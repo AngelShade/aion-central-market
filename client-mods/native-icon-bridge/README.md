@@ -89,3 +89,9 @@ The bridge clips that rectangle before removing transparent margins and
 resizing in memory. Install the matching DLL and index together.
 The isolated test compares Fresh Umblia and all ten legacy padding exceptions
 with independently decoded 40x40 client artwork.
+
+A complete original-texture audit found ten legacy padding exceptions shared
+by 43 item IDs. The browser regression checks Fresh Umblia and Cash Shop item
+IDs 164000074, 164000075 and 164000076 through their actual native routes,
+with zero corresponding HTTP image downloads. The sprite correction is shared
+by both shops and applies to every alias of each affected texture.

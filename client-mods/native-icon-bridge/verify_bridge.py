@@ -109,7 +109,9 @@ def main():
         def do_GET(self):
             requests.append(self.path)
             if self.path!='/':self.send_error(404);return
-            html=b'<html><body><img id="market" src="/market/media/icons/100000001.png?v=7"><img id="shop" src="/shop/media/icons/100000002.png?v=7"><img id="missing" src="/market/media/icons/999999999.png"><img id="other" src="/other/100000001.png"></body></html>'
+            # Exercise actual padding exceptions through both shop routes,
+            # including all three affected Cash Shop running-scroll IDs.
+            html=b'<html><body><img id="market" src="/market/media/icons/152000408.png?v=native-3"><img id="shop" src="/shop/media/icons/164000074.png?v=native-3"><img id="shop75" src="/shop/media/icons/164000075.png?v=native-3"><img id="shop76" src="/shop/media/icons/164000076.png?v=native-3"><img id="missing" src="/market/media/icons/999999999.png"><img id="other" src="/other/100000001.png"></body></html>'
             self.send_response(200);self.send_header('Content-Type','text/html');self.send_header('Content-Length',str(len(html)));self.end_headers();self.wfile.write(html)
         def log_message(self,*args):pass
     server=http.server.HTTPServer(('127.0.0.1',0),Handler)
@@ -121,17 +123,17 @@ def main():
             set_resource(view,prior)  # Later callbacks must retain the icon bridge.
             url=f'http://127.0.0.1:{server.server_port}/';value=make(url,len(url));load(view,value,empty,empty,empty);free(value)
             deadline=time.monotonic()+12
-            query="['market','shop','missing','other'].map(function(id){var a=document.getElementById(id);return a&&a.complete?a.naturalWidth:-1}).join(',')"
+            query="['market','shop','shop75','shop76','missing','other'].map(function(id){var a=document.getElementById(id);return a&&a.complete?a.naturalWidth:-1}).join(',')"
             result=''
             while time.monotonic()<deadline:
                 update();time.sleep(.05)
                 script=make(query,len(query));value=evaluate(view,script,empty);free(script)
                 if value:
                     string=text(value);buffer=c.create_string_buffer(128);utf8(string,buffer,len(buffer));result=buffer.value.decode();free(string);jsfree(value)
-                if result=='64,64,0,0':break
-            assert result=='64,64,0,0',result
+                if result=='64,64,64,64,0,0':break
+            assert result=='64,64,64,64,0,0',result
             destroy(view);views.remove(view)
-        assert not any('/100000001.png?v=7' in r or '/100000002.png?v=7' in r for r in requests),requests
+        assert not any(f'/{item}.png?v=native-3' in r for item in (152000408,164000074,164000075,164000076) for r in requests),requests
         assert requests.count('/market/media/icons/999999999.png')>=1 and requests.count('/other/100000001.png')>=1,requests
         assert len(forwarded)>=4,len(forwarded)
         print('PASS: automatic attachment, callback chaining, create/destroy reuse, Cash Shop + Central Market icons, zero HTTP downloads for native icons, missing-icon fallback')
