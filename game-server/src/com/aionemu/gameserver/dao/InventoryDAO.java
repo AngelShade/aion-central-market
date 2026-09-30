@@ -30,6 +30,12 @@ import com.aionemu.gameserver.utils.idfactory.IDFactory;
 public class InventoryDAO {
 
 	private static final Logger log = LoggerFactory.getLogger(InventoryDAO.class);
+	private static final java.util.Set<Integer> quarantinedPlayers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	/** Fail closed when committed market custody cannot be restored in memory. Cleared by a fresh login load. */
+	public static void quarantineMarketInventory(int playerId) {
+		quarantinedPlayers.add(playerId);
+	}
 
 	public static final String SELECT_QUERY = "SELECT * FROM `inventory` WHERE `item_owner`=? AND `item_location`=?";
 	public static final String SELECT_ALL_QUERY = "SELECT * FROM `inventory` WHERE `item_location`=?";
@@ -37,7 +43,7 @@ public class InventoryDAO {
 	public static final String INSERT_QUERY = "INSERT INTO `inventory` (`item_unique_id`, `item_id`, `item_count`, `item_color`, `color_expires`, `item_creator`, `expire_time`, `activation_count`, `item_owner`, `is_equipped`, is_soul_bound, `slot`, `item_location`, `enchant`, `enchant_bonus`, `item_skin`, `fusioned_item`, `optional_socket`, `optional_fusion_socket`, `charge`, `tune_count`, `rnd_bonus`, `fusion_rnd_bonus`, `tempering`, `pack_count`, `is_amplified`, `buff_skill`, `rnd_plume_bonus`, `rank_limit_expire_time`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 	public static final String UPDATE_QUERY = "UPDATE inventory SET item_count=?, item_color=?, color_expires=?, item_creator=?, expire_time=?, activation_count=?, item_owner=?, is_equipped=?, is_soul_bound=?, slot=?, item_location=?, enchant=?, enchant_bonus=?, item_skin=?, fusioned_item=?, optional_socket=?, optional_fusion_socket=?, charge=?, tune_count=?, rnd_bonus=?, fusion_rnd_bonus=?, tempering=?, pack_count=?, is_amplified=?, buff_skill=?, rnd_plume_bonus=?, rank_limit_expire_time=? WHERE item_unique_id=?";
 	public static final String DELETE_QUERY = "DELETE FROM inventory WHERE item_unique_id=?";
-	public static final String DELETE_CLEAN_QUERY = "DELETE FROM inventory WHERE item_owner=? AND item_location != 2"; // exclude acc wh since item_owner (acc id) is no idfactory id
+	public static final String DELETE_CLEAN_QUERY = "DELETE FROM inventory WHERE item_owner=? AND item_location NOT IN (2,125)"; // account-owned storage survives character deletion
 	public static final String SELECT_ACCOUNT_QUERY = "SELECT `account_id` FROM `players` WHERE `id`=?";
 	public static final String SELECT_LEGION_QUERY = "SELECT `legion_id` FROM `legion_members` WHERE `player_id`=?";
 	public static final String DELETE_ACCOUNT_WH = "DELETE FROM inventory WHERE item_owner=? AND item_location=2";
@@ -62,6 +68,7 @@ public class InventoryDAO {
 				item.setPersistentState(PersistentState.UPDATED);
 				itemConsumer.accept(item);
 			}
+			if (storageType == StorageType.CUBE) quarantinedPlayers.remove(ownerId);
 		} catch (Exception e) {
 			log.error("Could not load " + storageType + " items of owner " + ownerId, e);
 		}
@@ -178,12 +185,36 @@ public class InventoryDAO {
 	}
 
 	public static boolean store(Player player) {
+		synchronized (player.getClientConnection() == null ? player : player.getClientConnection()) {
+			return storePlayerInventory(player);
+		}
+	}
+
+	private static boolean storePlayerInventory(Player player) {
 		int playerId = player.getObjectId();
 		Integer accountId = player.getAccount() != null ? player.getAccount().getId() : null;
 		Integer legionId = player.getLegion() != null ? player.getLegion().getLegionId() : null;
 
 		List<Item> allPlayerItems = player.getDirtyItemsToUpdate();
-		return store(allPlayerItems, playerId, accountId, legionId);
+		boolean saved = store(allPlayerItems, playerId, accountId, legionId);
+		if (!saved) {
+			for (StorageType type : StorageType.values()) {
+				Storage storage = player.getStorage(type.getId());
+				if (storage != null) storage.setPersistentState(Storage.PersistentState.UPDATE_REQUIRED);
+			}
+			player.getEquipment().setPersistentState(Storage.PersistentState.UPDATE_REQUIRED);
+		}
+		return saved;
+	}
+
+	public static Item loadTransactionItem(Connection connection, int objectId) throws SQLException {
+		try (PreparedStatement s = connection.prepareStatement("SELECT * FROM inventory WHERE item_unique_id=?")) {
+			s.setInt(1,objectId);
+			try (ResultSet r = s.executeQuery()) {
+				if (!r.next()) throw new SQLException("Transferred item row is missing");
+				return constructItem(r.getInt("item_location"),r);
+			}
+		}
 	}
 
 	public static boolean store(Item item, Player player) {
@@ -201,7 +232,7 @@ public class InventoryDAO {
 
 		for (Item item : items) {
 
-			if (accountId == null && item.getItemLocation() == StorageType.ACCOUNT_WAREHOUSE.getId()) {
+			if (accountId == null && (item.getItemLocation() == StorageType.ACCOUNT_WAREHOUSE.getId() || item.getItemLocation() == StorageType.MARKET_WAREHOUSE.getId())) {
 				accountId = loadPlayerAccountId(playerId);
 			}
 
@@ -216,6 +247,7 @@ public class InventoryDAO {
 	}
 
 	public static boolean store(List<Item> items, Integer playerId, Integer accountId, Integer legionId) {
+		if (playerId != null && quarantinedPlayers.contains(playerId)) return false;
 		Collection<Item> itemsToUpdate = items.stream().filter(Persistable.CHANGED).collect(Collectors.toList());
 		Collection<Item> itemsToInsert = items.stream().filter(Persistable.NEW).collect(Collectors.toList());
 		Collection<Item> itemsToDelete = items.stream().filter(Persistable.DELETED).collect(Collectors.toList());
@@ -229,8 +261,11 @@ public class InventoryDAO {
 			deleteResult = deleteItems(con, itemsToDelete);
 			insertResult = insertItems(con, itemsToInsert, playerId, accountId, legionId);
 			updateResult = updateItems(con, itemsToUpdate, playerId, accountId, legionId);
+			if (deleteResult && insertResult && updateResult) con.commit();
+			else { con.rollback(); return false; }
 		} catch (SQLException e) {
 			log.error("Can't save inventory for player: " + playerId, e);
+			return false;
 		}
 
 		for (Item item : items) {
@@ -243,8 +278,13 @@ public class InventoryDAO {
 		return deleteResult && insertResult && updateResult;
 	}
 
+	/** Insert a newly allocated item as part of the caller's market transaction. Does not commit. */
+	public static boolean insertTransactionItem(Connection connection, Item item, Player player) {
+		return insertItems(connection, List.of(item), player.getObjectId(), player.getAccount().getId(), null);
+	}
+
 	private static int getItemOwnerId(Item item, Integer playerId, Integer accountId, Integer legionId) {
-		if (item.getItemLocation() == StorageType.ACCOUNT_WAREHOUSE.getId()) {
+		if (item.getItemLocation() == StorageType.ACCOUNT_WAREHOUSE.getId() || item.getItemLocation() == StorageType.MARKET_WAREHOUSE.getId()) {
 			return accountId;
 		}
 
@@ -296,7 +336,6 @@ public class InventoryDAO {
 			}
 
 			stmt.executeBatch();
-			con.commit();
 		} catch (Exception e) {
 			log.error("Failed to execute insert batch", e);
 			return false;
@@ -344,7 +383,6 @@ public class InventoryDAO {
 			}
 
 			stmt.executeBatch();
-			con.commit();
 		} catch (Exception e) {
 			log.error("Failed to execute update batch", e);
 			return false;
@@ -365,7 +403,6 @@ public class InventoryDAO {
 			}
 
 			stmt.executeBatch();
-			con.commit();
 		} catch (Exception e) {
 			log.error("Failed to execute delete batch", e);
 			return false;

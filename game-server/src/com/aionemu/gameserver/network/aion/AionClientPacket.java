@@ -35,8 +35,11 @@ public abstract class AionClientPacket extends BaseClientPacket<AionConnection> 
 	@Override
 	public final void run() {
 		try {
-			if (isValid()) // run only if packet is still valid (connection state didn't change, for example due to logout)
-				runImpl();
+			// Embedded warehouse transfers use the same guard as native item packets.
+			synchronized (getConnection()) {
+				if (isValid())
+					runImpl();
+			}
 		} catch (Throwable e) {
 			log.error("Error handling client packet from " + getConnection() + ": " + this, e);
 		}

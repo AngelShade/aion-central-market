@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Screen widget_cnt="2">
+  <Dialog name="PrivateWarehouse" frame="0,0,1280,960" text="Central Market" close_offset="4,1" close_preset="v5_close" flag="close;title;not_visible;not_movable;fittoscreenwidth;fittoscreenheight" preset="v5_dialog2" shadow_offset="0,0" title_height="25" title_offset="0,5">
+    <Scripts><OnLoad>PrivateWarehouse_OnLoad();</OnLoad></Scripts>
+    <Widget type="Browser" name="PrivateWarehouseBrowser" frame="0,25,1280,935"/>
+  </Dialog>
+</Screen>

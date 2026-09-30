@@ -185,6 +185,11 @@ public class GameServer {
 		SystemInfo.logAll();
 
 		nioServer = initNioServer();
+		try {
+			CentralMarketHttpService.start();
+		} catch (Exception e) {
+			log.error("Could not start Central Market", e);
+		}
 		Runtime.getRuntime().addShutdownHook(ShutdownHook.getInstance());
 		log.info("Game server started in " + (System.currentTimeMillis() / 1000 - START_TIME_SECONDS) + " seconds.");
 

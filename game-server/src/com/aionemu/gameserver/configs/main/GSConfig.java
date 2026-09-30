@@ -77,6 +77,15 @@ public class GSConfig {
 	@Property(key = "gameserver.web_rewards.enable", defaultValue = "false")
 	public static boolean ENABLE_WEB_REWARDS;
 
+	@Property(key = "gameserver.centralmarket.enable", defaultValue = "false")
+	public static boolean ENABLE_CENTRAL_MARKET;
+
+	@Property(key = "gameserver.centralmarket.bind", defaultValue = "127.0.0.1")
+	public static String CENTRAL_MARKET_BIND;
+
+	@Property(key = "gameserver.centralmarket.port", defaultValue = "8091")
+	public static int CENTRAL_MARKET_PORT;
+
 	@Property(key = "gameserver.analysis.quest_handlers", defaultValue = "true")
 	public static boolean ANALYZE_QUESTHANDLERS;
 

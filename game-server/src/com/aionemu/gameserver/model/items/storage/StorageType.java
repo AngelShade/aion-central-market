@@ -41,7 +41,8 @@ public enum StorageType {
 	HOUSE_STORAGE_19(78, 27, 9), // Strong 3-Drawer Cabinet
 	HOUSE_STORAGE_20(79, 27, 9), // Firm 3-Drawer Cabinet
 	BROKER(126),
-	MAILBOX(127);
+	MAILBOX(127),
+	MARKET_WAREHOUSE(125); // Account-owned; accessed only through Central Market transactions.
 
 	public static final int PET_BAG_MIN = 32;
 	public static final int PET_BAG_MAX = 43;

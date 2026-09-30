@@ -15,3 +15,4 @@ login-server/target/
 **/*.iml
 **/.classpath
 **/.project
+game-server/config/central-market/media/icons/

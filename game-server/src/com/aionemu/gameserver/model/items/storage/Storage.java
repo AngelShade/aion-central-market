@@ -164,6 +164,21 @@ public abstract class Storage implements IStorage {
 			itemStorage.putItem(item);
 	}
 
+	/** Restore committed warehouse contents before disconnecting after a failed client refresh. */
+	public final void restoreCommittedItems(List<Item> items) {
+		int limit = itemStorage.getLimit();
+		itemStorage = new ItemStorage(storageType);
+		itemStorage.setLimit(limit);
+		kinahItem = null;
+		if (deletedItems != null) deletedItems.clear();
+		for (Item item : items) if (!item.isEquipped()) {
+			item.setPersistentState(com.aionemu.gameserver.model.gameobjects.Persistable.PersistentState.UPDATED);
+			if (item.getItemTemplate().isKinah()) kinahItem = item;
+			else if (!itemStorage.putItem(item)) throw new IllegalStateException("Committed storage could not be restored");
+		}
+		persistentState = PersistentState.UPDATED;
+	}
+
 	Item add(Item item, Player actor) {
 		return add(item, ItemService.DEFAULT_UPDATE_PREDICATE.getAddType(), actor);
 	}

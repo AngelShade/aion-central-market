@@ -1,0 +1,6 @@
+{
+  "serverCommands": [
+    {"label": "Central Market", "command": "warehouse"}
+  ],
+  "centralMarket": {"url": "http://127.0.0.1:8091/market"}
+}

@@ -13,6 +13,7 @@ import com.aionemu.gameserver.configs.main.ShutdownConfig;
 import com.aionemu.gameserver.model.gameobjects.player.Player;
 import com.aionemu.gameserver.network.aion.serverpackets.SM_SYSTEM_MESSAGE;
 import com.aionemu.gameserver.services.GameTimeService;
+import com.aionemu.gameserver.services.CentralMarketHttpService;
 import com.aionemu.gameserver.services.PeriodicSaveService;
 import com.aionemu.gameserver.services.cron.CronService;
 import com.aionemu.gameserver.services.cron.CurrentThreadRunnableRunner;
@@ -73,6 +74,7 @@ public class ShutdownHook extends Thread {
 			}
 		}
 
+		CentralMarketHttpService.stop();
 		GameServer.shutdownNioServer(); // shuts down network, disconnects cs/ls/all players and schedules leaveWorld
 		PlayerLeaveWorldService.processPendingLeaveWorldTasks();
 
