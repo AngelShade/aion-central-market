@@ -15,6 +15,7 @@ if ($manifest.signatureIsolation -in 'plugin-v1','archive-v2') { $expected += @(
 if ($manifest.signatureRepair) { $expected = @($expected | Where-Object { $_ -notin @('bin64/game.dll', 'Plugin/RelicCalc/RelicCalc.pak') }) }
 if ($manifest.inventorySlots -in 180,279) { $expected += 'Data/ui/game/game.pak' }
 if ($manifest.inventorySlots -in 180,279 -and $manifest.files.path -contains 'L10N/enu/data/data.pak') { $expected += 'L10N/enu/data/data.pak' }
+if ($manifest.nativeIcons) { $expected += @('bin64/AionIconBridge.dll', 'bin64/AionIconBridge.index') }
 if (-not $manifest.signatureIsolation -and @($manifest.files).Count -eq 5) { $expected = @($expected | Where-Object { $_ -ne 'bin64/game.dll' }) }
 if (@($manifest.files).Count -ne $expected.Count -or (Compare-Object ($manifest.files.path | Sort-Object) ($expected | Sort-Object))) { throw 'Unexpected backup file list.' }
 foreach ($entry in $manifest.files) {

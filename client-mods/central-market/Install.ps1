@@ -15,6 +15,13 @@ if ($manifest.signatureIsolation -in 'plugin-v1','archive-v2') { $expected += @(
 if ($manifest.signatureRepair) { $expected = @($expected | Where-Object { $_ -notin @('bin64/game.dll', 'Plugin/RelicCalc/RelicCalc.pak') }) }
 if ($manifest.inventorySlots -in 180,279) { $expected += 'Data/ui/game/game.pak' }
 if ($manifest.inventorySlots -in 180,279 -and $manifest.files.path -contains 'L10N/enu/data/data.pak') { $expected += 'L10N/enu/data/data.pak' }
+if ($manifest.nativeIcons) {
+    $expected += @('bin64/AionIconBridge.dll', 'bin64/AionIconBridge.index')
+    if ((Get-FileHash -LiteralPath (Join-Path $clientRoot 'bin64/Awesomium.dll')).Hash -ne $manifest.nativeIcons.awesomiumSha256 -or
+        (Get-FileHash -LiteralPath (Join-Path $clientRoot 'Data/Items/Items.pak')).Hash -ne $manifest.nativeIcons.archiveSha256) {
+        throw 'Original client icon inputs changed since preparation.'
+    }
+}
 if (@($manifest.files).Count -ne $expected.Count -or (Compare-Object ($manifest.files.path | Sort-Object) ($expected | Sort-Object))) {
     throw 'Unexpected replacement file list.'
 }

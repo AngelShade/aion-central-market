@@ -16,3 +16,7 @@ login-server/target/
 **/.classpath
 **/.project
 game-server/config/central-market/media/icons/
+
+**/__pycache__/
+
+**/media/icons/*.png

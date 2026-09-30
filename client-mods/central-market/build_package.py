@@ -83,7 +83,13 @@ def main():
     cry_system.write_bytes(patch_plugin_key((root / 'bin64/crysystem.dll').read_bytes()))
     patched_dll = output / 'bin64/game.dll'
     patched_dll.parent.mkdir(parents=True, exist_ok=True)
-    dll = build_dll(root / 'bin64/game.dll', commands, [settings['centralMarket']['url']])
+    dll_source = root / 'bin64/game.dll.orig' if (root / 'bin64/game.dll.orig').exists() else root / 'bin64/game.dll'
+    dll = build_dll(dll_source, commands, [settings['centralMarket']['url']])
+    sys.path.insert(0, str(mod_root.parent / 'native-icon-bridge'))
+    from build_bridge import build as build_icon_bridge
+    from patch_client import patch_dll as patch_icon_bridge_dll
+    native_manifest = build_icon_bridge(root, output)
+    dll = patch_icon_bridge_dll(dll)
     patched_dll.write_bytes(dll)
     replacements = []
     for staged in sorted(output.rglob('*')):
@@ -95,7 +101,7 @@ def main():
               for f in sorted(previous_addon.rglob('*')) if f.is_file()]
     retired = [{'path': 'bin64/game.dll.patched', 'sha256': digest(root / 'bin64/game.dll.patched')}] if (root / 'bin64/game.dll.patched').exists() else []
     manifest = {'clientRoot': str(root), 'files': replacements, 'legacyAddon': legacy, 'retiredFiles': retired,
-                'inventorySlots': 0, 'signatureIsolation': 'archive-v2'}
+                'inventorySlots': 0, 'signatureIsolation': 'archive-v2', 'nativeIcons': native_manifest}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     print(f'Prepared {len(replacements)} replacements in {output}; client untouched.')
     print('Prepared the Central Market menu and browser window before Relic Appraiser.')

@@ -25,7 +25,7 @@ public final class CentralMarketHttpService {
 	private static final Path MEDIA=Path.of("config/central-market/media");
 	private static final Map<String,Form> FORMS=new ConcurrentHashMap<>();
 	private static final SecureRandom RANDOM=new SecureRandom();
-	private static final Map<Integer,String> ICONS=new ConcurrentHashMap<>();
+	private static final Set<Integer> CLIENT_ITEMS=ConcurrentHashMap.newKeySet();
 	private static HttpServer server;
 	public static synchronized void start() throws Exception {
 		if (!GSConfig.ENABLE_CENTRAL_MARKET) return;
@@ -51,19 +51,13 @@ public final class CentralMarketHttpService {
 		return null;
 	}
 	static void loadIcons() throws IOException {
-		ICONS.clear();
-		Set<String> files=new HashSet<>();
+		CLIENT_ITEMS.clear();
 		for(String line:Files.readAllLines(MEDIA.resolve("icon_sources.tsv"))) {
 			String[] fields=line.split("\t");
-			if(fields.length>=2 && fields[0].matches("[0-9]{9}") && fields[1].matches("[a-z0-9_-]+\\.png")) {
-				ICONS.put(Integer.parseInt(fields[0]),fields[1]);
-				files.add(fields[1]);
-			}
+			if(fields.length>=2 && fields[0].matches("[0-9]{9}")) CLIENT_ITEMS.add(Integer.parseInt(fields[0]));
 		}
-		long missing=files.stream().filter(file->!Files.isRegularFile(MEDIA.resolve("icons").resolve(file))).count();
-		if(missing>0) throw new IOException("Central Market requires extracted client icons: "+missing+" files missing");
 	}
-	static boolean hasClientItem(int item) { return ICONS.containsKey(item); }
+	static boolean hasClientItem(int item) { return CLIENT_ITEMS.contains(item); }
 	private record Form(Player player,Object connection,long expires) {}
 	private CentralMarketHttpService() {}
 
@@ -77,16 +71,10 @@ public final class CentralMarketHttpService {
 			if (method.equals("GET") && path.equals("/market")) { send(x,200,"text/html",Files.readString(MEDIA.resolve("market.html")));return; }
 			if (method.equals("GET") && path.startsWith("/market/media/")) {
 				String file=path.substring("/market/media/".length());
-				if(!file.matches("market\\.(css|js)|icons/[0-9]{9}\\.png")){send(x,404,"text/plain","Not found");return;}
-				if(file.startsWith("icons/")) {
-					// Extracted client artwork is static; rebuilding a row must not download it again.
-					x.getResponseHeaders().set("Cache-Control","public, max-age=86400");
-					String icon=ICONS.get(Integer.parseInt(file.substring(6,15)));
-					if(icon==null){send(x,404,"text/plain","Item has no client icon");return;}
-					file="icons/"+icon;
-				}
+				// Item image URLs are fulfilled inside the patched client from Items.pak.
+				if(!file.matches("market\\.(css|js)")){send(x,404,"text/plain","Native client icon bridge required");return;}
 				Path asset=MEDIA.resolve(file); if(!Files.isRegularFile(asset)){send(x,404,"text/plain","Not found");return;}
-				byte[] data=Files.readAllBytes(asset);x.getResponseHeaders().set("Content-Type",file.endsWith(".png")?"image/png":file.endsWith(".js")?"application/javascript; charset=utf-8":"text/css; charset=utf-8");
+				byte[] data=Files.readAllBytes(asset);x.getResponseHeaders().set("Content-Type",file.endsWith(".js")?"application/javascript; charset=utf-8":"text/css; charset=utf-8");
 				x.sendResponseHeaders(200,data.length);x.getResponseBody().write(data);return;
 			}
 			if (!path.equals("/market/state") && !path.equals("/market/action")){send(x,404,"application/json","{\"error\":\"Not found.\"}");return;}

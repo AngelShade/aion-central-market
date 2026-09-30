@@ -14,7 +14,7 @@
   // Native browser tooltip type 28 parses named fields separated by '&'.
   function tooltipLink(i) { return 'nc://aion.ItemInfo/ItemTooltip?' + (i.tooltip || 'item=' + (+i.item_id) + '&count=' + (i.quantity || 1) + '&enchant_count=' + (i.enchant || 0) + '&authorize_count=' + (i.tempering || 0)); }
   // Icons are cropped during asset preparation, avoiding synchronous canvas/GPU readback.
-  function image(i) { var link = html(tooltipLink(i)); return '<a class="item-icon" href="' + link + '" title="' + link + '" onclick="return false" tabindex="-1" aria-hidden="true"><img src="/market/media/icons/' + i.item_id + '.png?v=7" alt="" onerror="this.style.visibility=\'hidden\'"></a>'; }
+  function image(i) { var link = html(tooltipLink(i)); return '<a class="item-icon" href="' + link + '" title="' + link + '" onclick="return false" tabindex="-1" aria-hidden="true"><img src="/market/media/icons/' + i.item_id + '.png?v=native-3" alt="" onerror="this.style.visibility=\'hidden\'"></a>'; }
   function name(i) { return (i.enchant ? '+' + i.enchant + ' ' : '') + i.name + (i.tempering ? ' · Tempering +' + i.tempering : ''); }
   function stackLabel(n) { return n + ' item stack' + (n === 1 ? '' : 's'); }
   function fields(extra) { var a = {}, k; for (k in query) if (query.hasOwnProperty(k)) a[k] = query[k]; a.session_id = decodeURIComponent(session); for (k in extra) if (extra.hasOwnProperty(k)) a[k] = extra[k]; return a; }
