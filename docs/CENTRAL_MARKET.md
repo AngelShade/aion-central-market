@@ -65,17 +65,3 @@ The implementation uses published Central Market behavior, with Aion items and K
 | Collection | 65% of gross proceeds; Premium membership maps to the Value Pack's 84.5% return |
 | Current price band | Up to ±7.5% around base, clamped to absolute limits |
 | Item attributes | Aion enchantment, tempering, appearance, sockets, armsfusion and random bonuses remain with the actual item |
-
-BDO's complete price algorithm and all item-specific limits are not publicly specified. The Aion pricing policy is explicit in `CentralMarketRules` and `CentralMarketService`: initial prices use template value, level, quality and enhancement; absolute limits start at one tenth and ten times that seed; the ladder uses 0.5% ticks; open-order imbalance changes the base by 1% every eight hours. Order quantity is at most 1,000 or the template stack limit, and nonstackable gear uses quantity one. Existing orders remain visible when the price band moves.
-
-The floor-price sale lottery is an Aion policy; the cited official sources explicitly document buyer lotteries. The implementation does not create an NPC market maker or duplicate BDO's older guide behavior where the Marketplace Director purchases initial stock.
-
-BDO systems without an Aion equivalent—Family Fame, maids, Pearl items and its mobile application—are not introduced. Premium uses this server's existing membership value. Aion character/account warehouse restrictions remain enforced. Modified gear has separate exact variants rather than losing its Aion attributes.
-
-Primary research:
-
-- [Pearl Abyss Central Market guide](https://blackdesert.pearlabyss.com/Asia/en-US/Game/Wiki?_masterWikiNo=39)
-- [Updated item volumes, March 2023](https://blackdesert.pearlabyss.com/Console/en-us/News/Notice/Detail?_boardNo=10996)
-- [High-value registration and matching, June 2021](https://www.console.playblackdesert.com/News/Notice/Detail?boardNo=7580&countryType=en-US)
-- [Registration-queue price restriction, January 2023](https://blackdesert.pearlabyss.com/Console/en-us/News/Notice/Detail?_boardNo=10873)
-- [Central Market price limits, 2026](https://blackdesert.pearlabyss.com/Console/en-US/News/Notice/Detail?_boardNo=13304)
