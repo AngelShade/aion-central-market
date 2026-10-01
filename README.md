@@ -7,7 +7,7 @@ This repository adds an account-wide Central Market and combined Warehouse windo
 The market uses Aion items and Kinah. Players can move items between Inventory, Character Warehouse, Account Warehouse, and Market Warehouse; deposit Kinah; place buy and sale orders; cancel unfilled orders; and collect taxed proceeds. Items remain real inventory rows with their enchantment, sockets, appearance, and other attributes. The existing Broker stays separate. See [market rules and behavior](docs/CENTRAL_MARKET.md).
 
 ## What is included
-
+https://www.youtube.com/watch?v=fYqK6Y1Bazg
 - `game-server/src/.../CentralMarket*`: transactional custody, matching, account-bound HTTP requests, and market rules.
 - `game-server/config/central-market`: the database schema, browser HTML/CSS/JavaScript, and an item-to-icon mapping.
 - `client-mods/central-market`: source for a version-checked client menu/browser patch, archive signing, installation, restoration, and a native client icon bridge.
