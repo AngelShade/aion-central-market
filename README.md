@@ -1,4 +1,4 @@
-# Aion 4.8 Central Market
+# Aion 4.8 Server Emulator - Central Market
 
 This repository adds an account-wide Central Market and combined Warehouse window to the [Beyond Aion 4.8 server emulator](https://github.com/beyond-aion/aion-server). The branch starts at upstream commit `267ce6033f39e8d297d2ac2657e5a6e930723578`; [the original README](docs/UPSTREAM_README.md) and GPL-3.0 license are retained.
 
