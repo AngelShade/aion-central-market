@@ -1,5 +1,7 @@
 # Aion 4.8 Server Emulator - Central Market
 
+Based and works on https://github.com/beyond-aion/aion-server
+
 This repository adds an account-wide Central Market and combined Warehouse window to the [Beyond Aion 4.8 server emulator](https://github.com/beyond-aion/aion-server). The branch starts at upstream commit `267ce6033f39e8d297d2ac2657e5a6e930723578`; [the original README](docs/UPSTREAM_README.md) and GPL-3.0 license are retained.
 
 The market uses Aion items and Kinah. Players can move items between Inventory, Character Warehouse, Account Warehouse, and Market Warehouse; deposit Kinah; place buy and sale orders; cancel unfilled orders; and collect taxed proceeds. Items remain real inventory rows with their enchantment, sockets, appearance, and other attributes. The existing Broker stays separate. See [market rules and behavior](docs/CENTRAL_MARKET.md).
