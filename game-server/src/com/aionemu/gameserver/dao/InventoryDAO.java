@@ -283,6 +283,10 @@ public class InventoryDAO {
 		return insertItems(connection, List.of(item), player.getObjectId(), player.getAccount().getId(), null);
 	}
 
+	public static boolean insertTransactionMarketItem(Connection connection, Item item, int account) {
+		return insertItems(connection,List.of(item),null,account,null);
+	}
+
 	private static int getItemOwnerId(Item item, Integer playerId, Integer accountId, Integer legionId) {
 		if (item.getItemLocation() == StorageType.ACCOUNT_WAREHOUSE.getId() || item.getItemLocation() == StorageType.MARKET_WAREHOUSE.getId()) {
 			return accountId;

@@ -48,3 +48,12 @@ CREATE TABLE IF NOT EXISTS central_market_searches (
  account_id INT NOT NULL, term VARCHAR(60) NOT NULL, created_at BIGINT NOT NULL,
  PRIMARY KEY (account_id,term), INDEX recent_search (account_id,created_at)
 ) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS central_market_simulation (
+ variant VARCHAR(96) NOT NULL PRIMARY KEY, next_refresh BIGINT NOT NULL,
+ INDEX refresh_due (next_refresh)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS central_market_settlements (
+ order_id BIGINT NOT NULL PRIMARY KEY, gross BIGINT NOT NULL DEFAULT 0,
+ collected_quantity BIGINT NOT NULL DEFAULT 0,
+ CONSTRAINT cm_settlement_order FOREIGN KEY (order_id) REFERENCES central_market_orders(id)
+) ENGINE=InnoDB;

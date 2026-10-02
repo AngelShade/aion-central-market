@@ -6,11 +6,13 @@ import java.security.MessageDigest;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import com.aionemu.commons.database.DatabaseFactory;
 import com.aionemu.gameserver.GameServer;
 import com.aionemu.gameserver.configs.main.GSConfig;
+import com.aionemu.gameserver.configs.main.CentralMarketSimulationConfig;
 import com.aionemu.gameserver.dao.InventoryDAO;
 import com.aionemu.gameserver.dao.ItemStoneListDAO;
 import com.aionemu.gameserver.dataholders.DataManager;
@@ -34,10 +36,12 @@ import org.slf4j.LoggerFactory;
 public final class CentralMarketService {
 	private static final Logger log = LoggerFactory.getLogger(CentralMarketService.class);
 	private static final int MARKET = StorageType.MARKET_WAREHOUSE.getId();
-	private static final Object LOCK = new Object();
+	private static final ReentrantLock LOCK = new ReentrantLock(true);
 	private static List<ItemTemplate> templates = List.of();
 	private static Map<Integer,String> catalogCategories = Map.of();
 	private static volatile boolean ready;
+	private static boolean simulationInitialized;
+	private static long housekeepingAt;
 	private static final String COPY_COLUMNS = "item_id,item_count,item_color,color_expires,item_creator,expire_time,activation_count,item_owner,is_equipped,is_soul_bound,slot,item_location,enchant,enchant_bonus,item_skin,fusioned_item,optional_socket,optional_fusion_socket,charge,tune_count,rnd_bonus,fusion_rnd_bonus,tempering,pack_count,is_amplified,buff_skill,rnd_plume_bonus,rank_limit_expire_time";
 
 	private CentralMarketService() {}
@@ -56,10 +60,13 @@ public final class CentralMarketService {
 		try (Connection c = DatabaseFactory.getConnection()) {
 			c.setAutoCommit(false);
 			for (ItemTemplate t : templates) catalog(c, t, t.getTemplateId() + ":0:0", 0, 0);
+			if(!CentralMarketSimulationConfig.ENABLED || CentralMarketSimulationConfig.POPULATION<=0) CentralMarketSimulation.disable(c);
+			CentralMarketSettlement.migrate(c);
 			c.commit();
 		}
 		ready = true;
-		ThreadPoolManager.getInstance().scheduleAtFixedRate(CentralMarketService::maintain, 1000, 60_000);
+		long tick=Math.max(200,Math.min(5000,Math.max(1,CentralMarketSimulationConfig.TICK_SECONDS)*1000L/Math.max(1,(CentralMarketSimulationConfig.CATALOG_BATCH+39)/40)));
+		ThreadPoolManager.getInstance().scheduleAtFixedRate(CentralMarketService::maintain, 1000, tick);
 		log.info("Central Market ready: {} tradeable templates, database custody enabled", templates.size());
 	}
 
@@ -100,7 +107,7 @@ public final class CentralMarketService {
 		if (i.getItemSkinTemplate().getTemplateId() != i.getItemId() || i.getFusionedItemId() != 0 || i.getBonusStatsId() != 0
 			|| i.getGodStoneId() != 0 || i.getItemColor() != null || i.getPackCount() != 0 || i.getEnchantBonus() != 0
 			|| i.getOptionalSockets() != 0 || i.getChargePoints() != 0 || i.getBuffSkill() != 0 || i.getRndPlumeBonusValue() != 0 || i.hasManaStones()
-			|| i.getTuneCount()!=0 || i.isAmplified()!= (i.getItemTemplate().getEnchantType()==1) || i.getIdianStone()!=null || !i.getFusionStones().isEmpty()) {
+			|| (i.getTuneCount()!=0 && i.getTuneCount()!=-1) || i.isAmplified()!= (i.getItemTemplate().getEnchantType()==1) || i.getIdianStone()!=null || !i.getFusionStones().isEmpty()) {
 			try { key += ":" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(attributes.getBytes(StandardCharsets.UTF_8))).substring(0, 24); }
 			catch (Exception e) { throw new IllegalStateException(e); }
 		}
@@ -123,11 +130,13 @@ public final class CentralMarketService {
 		Object guard = p.getClientConnection();
 		if (guard == null) throw new IllegalArgumentException("Log in to use Central Market.");
 		synchronized (guard) {
-			synchronized (LOCK) {
+			LOCK.lock();try {
 				if (World.getInstance().getPlayer(p.getObjectId()) != p || p.isDead() || p.isTrading() || GameServer.isShuttingDownSoon())
 					throw new IllegalArgumentException("Warehouse is unavailable during trade, death or shutdown.");
-				if (!InventoryDAO.store(p)) throw new SQLException("Inventory save failed");
-				ItemStoneListDAO.save(p);
+				if(Set.of("transfer","transferBatch","kinah").contains(a.getOrDefault("action",""))) {
+					if (!InventoryDAO.store(p)) throw new SQLException("Inventory save failed");
+					ItemStoneListDAO.save(p);
+				}
 				int account = p.getAccount().getId();
 				List<Runnable> committed = new ArrayList<>();
 				List<Integer> allocated = new ArrayList<>();
@@ -145,7 +154,7 @@ public final class CentralMarketService {
 							case "kinah" -> kinah(c,p,a,committed,allocated);
 							case "buy", "sell" -> order(c,p,a,allocated,committed);
 							case "cancel" -> cancel(c, account, number(a,"order"));
-							case "collect" -> collect(c,p);
+							case "collect" -> CentralMarketSettlement.collect(c,account,number(a,"order"),p.getAccount().getMembership()>0);
 							case "favorite" -> favorite(c,account,(int)number(a,"item"));
 							case "saveSearch" -> saveSearch(c,account,a);
 							default -> throw new IllegalArgumentException("Unknown market action.");
@@ -175,7 +184,7 @@ public final class CentralMarketService {
 						throw e;
 					}
 				}
-			}
+			} finally { LOCK.unlock(); }
 		}
 	}
 
@@ -461,13 +470,22 @@ public final class CentralMarketService {
 				update(c,"INSERT INTO central_market_stock(item_unique_id,account_id,variant,order_id) VALUES(?,?,?,?)",id,account,key,order);
 			} else update(c,"UPDATE central_market_stock SET order_id=? WHERE item_unique_id=?",order,id);
 		}
-		if (available == now) match(c,key,allocated);
+		if (available == now) {
+			// Fill resting stock before replacing any simulation quote the player just saw.
+			match(c,key,allocated);
+			CentralMarketSimulation.refresh(c,entry,now);
+			match(c,key,allocated);
+		}
 		else committed.add(()-> { for(Player online:World.getInstance().getAllPlayers()) com.aionemu.gameserver.utils.PacketSendUtility.sendMessage(online,"Central Market: "+template.getName()+" listed for "+price+" Kinah. Available in 15 minutes."); });
-		return side.equals("B") ? "Purchase registered. Unfilled quantity remains as a buy order." : available > now ? "Sale added to the 15-minute registration queue." : "Sale registered. Collect proceeds after items sell.";
+		long remaining=lng(row(c,"SELECT remaining FROM central_market_orders WHERE id=?",order),"remaining");
+		long filled=qty-remaining;
+		return (side.equals("B") ? "Bought " : "Sold ")+filled+" / "+qty+" items. "
+			+ (filled>0 ? "Collect "+(side.equals("B")?"items":"Kinah")+" beside this order in My Orders. " : "")
+			+ (available>now ? "Sale queued for 15 minutes." : remaining>0 ? remaining+" items remain on order." : "Order complete.");
 	}
 
 	private static void match(Connection c, String key, List<Integer> allocated) throws SQLException {
-		Map<String,Object> entry = row(c,"SELECT floor_price,ceiling_price FROM central_market_catalog WHERE variant=?",key);
+		Map<String,Object> entry = row(c,"SELECT item_id,floor_price,ceiling_price FROM central_market_catalog WHERE variant=?",key);
 		while (true) {
 			List<Map<String,Object>> sells = rows(c,"SELECT * FROM central_market_orders WHERE variant=? AND side='S' AND state='OPEN' AND remaining>0 ORDER BY price,created_at,id FOR UPDATE",key);
 			List<Map<String,Object>> buys = rows(c,"SELECT * FROM central_market_orders WHERE variant=? AND side='B' AND state='OPEN' AND remaining>0 ORDER BY price DESC,created_at,id FOR UPDATE",key);
@@ -481,7 +499,7 @@ public final class CentralMarketService {
 				if (candidates.isEmpty()) continue;
 				sell = s; buy = candidates.getFirst();
 				long highest = lng(buy,"price");
-				if (highest == lng(entry,"ceiling_price") || lng(s,"available_at")>lng(s,"created_at")) {
+				if (candidates.size()>1) {
 					List<Map<String,Object>> tied = candidates.stream().filter(b -> lng(b,"price") == highest).toList();
 					buy = tied.get(ThreadLocalRandom.current().nextInt(tied.size()));
 				}
@@ -492,18 +510,38 @@ public final class CentralMarketService {
 			long price = buyId < sellId ? lng(buy,"price") : lng(sell,"price");
 			long gross = CentralMarketRules.total(price,qty), refund = CentralMarketRules.total(lng(buy,"price"),qty) - gross;
 			int buyer = (int)lng(buy,"account_id"), seller = (int)lng(sell,"account_id");
-			Map<String,Object> held = row(c,"SELECT s.item_unique_id,i.item_count FROM central_market_stock s JOIN inventory i USING(item_unique_id) WHERE s.order_id=? FOR UPDATE",sellId);
-			if (held == null || lng(held,"item_count") < qty) throw new SQLException("Market custody mismatch for sale " + sellId);
-			int id = (int)lng(held,"item_unique_id");
-			if (qty < lng(held,"item_count")) {
-				id = split(c,id,qty,allocated);
-				update(c,"INSERT INTO central_market_stock(item_unique_id,account_id,variant) VALUES(?,?,?)",id,buyer,key);
-			} else update(c,"UPDATE central_market_stock SET account_id=?,order_id=NULL WHERE item_unique_id=?",buyer,id);
-			update(c,"UPDATE inventory SET item_owner=?,slot=65535 WHERE item_unique_id=?",buyer,id);
-			Map<String,Object> sellerWallet = row(c,"SELECT proceeds FROM central_market_wallet WHERE account_id=? FOR UPDATE",seller);
-			CentralMarketRules.add(lng(sellerWallet,"proceeds"),gross);
-			update(c,"UPDATE central_market_wallet SET proceeds=proceeds+?,version=version+1 WHERE account_id=?",gross,seller);
-			if (refund > 0) credit(c,buyer,refund);
+			if (buyer != 0) {
+				int id;
+				if (seller == 0) {
+					ItemTemplate template=DataManager.ITEM_DATA.getItemTemplate((int)lng(entry,"item_id"));
+					if(template==null || !key.equals(template.getTemplateId()+":0:0")) throw new SQLException("Invalid virtual supply variant");
+					id=IDFactory.getInstance().nextId(); allocated.add(id);
+					Item item=new Item(id,template,qty,false,0); item.setItemLocation(MARKET);item.setEquipmentSlot(65535);
+					if(!InventoryDAO.insertTransactionMarketItem(c,item,buyer)) throw new SQLException("Virtual purchase could not be persisted");
+					update(c,"INSERT INTO central_market_stock(item_unique_id,account_id,variant,order_id) VALUES(?,?,?,?)",id,buyer,key,buyId);
+				} else {
+					Map<String,Object> held=row(c,"SELECT s.item_unique_id,i.item_count FROM central_market_stock s JOIN inventory i USING(item_unique_id) WHERE s.order_id=? FOR UPDATE",sellId);
+					if(held==null || lng(held,"item_count")<qty) throw new SQLException("Market custody mismatch for sale "+sellId);
+					id=(int)lng(held,"item_unique_id");
+					if(qty<lng(held,"item_count")) { id=split(c,id,qty,allocated);update(c,"INSERT INTO central_market_stock(item_unique_id,account_id,variant,order_id) VALUES(?,?,?,?)",id,buyer,key,buyId); }
+					else update(c,"UPDATE central_market_stock SET account_id=?,order_id=? WHERE item_unique_id=?",buyer,buyId,id);
+					update(c,"UPDATE inventory SET item_owner=?,slot=65535 WHERE item_unique_id=?",buyer,id);
+				}
+				update(c,"INSERT IGNORE INTO central_market_settlements(order_id) VALUES(?)",buyId);
+				if(refund>0) credit(c,buyer,refund);
+			} else {
+				Map<String,Object> held=row(c,"SELECT s.item_unique_id,i.item_count FROM central_market_stock s JOIN inventory i USING(item_unique_id) WHERE s.order_id=? FOR UPDATE",sellId);
+				if(held==null || lng(held,"item_count")<qty) throw new SQLException("Market custody mismatch for sale "+sellId);
+				int id=(int)lng(held,"item_unique_id");
+				if(qty<lng(held,"item_count")) update(c,"UPDATE inventory SET item_count=item_count-? WHERE item_unique_id=?",qty,id);
+				else { update(c,"DELETE FROM item_stones WHERE item_unique_id=?",id);update(c,"DELETE FROM central_market_stock WHERE item_unique_id=?",id);update(c,"DELETE FROM inventory WHERE item_unique_id=?",id); }
+			}
+			if(seller!=0) {
+				Map<String,Object> sellerWallet=row(c,"SELECT proceeds FROM central_market_wallet WHERE account_id=? FOR UPDATE",seller);
+				CentralMarketRules.add(lng(sellerWallet,"proceeds"),gross);
+				update(c,"UPDATE central_market_wallet SET proceeds=proceeds+?,version=version+1 WHERE account_id=?",gross,seller);
+				update(c,"INSERT INTO central_market_settlements(order_id,gross) VALUES(?,?) ON DUPLICATE KEY UPDATE gross=gross+VALUES(gross)",sellId,gross);
+			}
 			for (long order : new long[]{buyId,sellId}) update(c,"UPDATE central_market_orders SET state=IF(remaining=?,'FILLED','OPEN'),remaining=remaining-? WHERE id=?",qty,qty,order);
 			update(c,"INSERT INTO central_market_trades(variant,buyer_account,seller_account,quantity,unit_price,buy_order,sell_order,traded_at) VALUES(?,?,?,?,?,?,?,?)",key,buyer,seller,qty,price,buyId,sellId,System.currentTimeMillis());
 			update(c,"UPDATE central_market_catalog SET traded=traded+? WHERE variant=?",qty,key);
@@ -514,7 +552,7 @@ public final class CentralMarketService {
 		Map<String,Object> order = row(c,"SELECT * FROM central_market_orders WHERE id=? AND account_id=? FOR UPDATE",id,account);
 		if (order == null || !Set.of("OPEN","QUEUED").contains(str(order,"state"))) throw new IllegalArgumentException("This order has already completed or been cancelled.");
 		if (str(order,"side").equals("B")) credit(c,account,CentralMarketRules.total(lng(order,"price"),lng(order,"remaining")));
-		else update(c,"UPDATE central_market_stock SET order_id=NULL WHERE order_id=?",id);
+		else update(c,"UPDATE central_market_stock SET order_id=NULL WHERE order_id=? AND account_id=?",id,account);
 		update(c,"UPDATE central_market_orders SET state='CANCELLED' WHERE id=?",id);
 		return "Order cancelled. Remaining items or Kinah returned to Market Warehouse.";
 	}
@@ -522,17 +560,6 @@ public final class CentralMarketService {
 	private static void credit(Connection c, int account, long amount) throws SQLException {
 		long current = lng(row(c,"SELECT kinah FROM central_market_wallet WHERE account_id=? FOR UPDATE",account),"kinah");
 		update(c,"UPDATE central_market_wallet SET kinah=?,version=version+1 WHERE account_id=?",CentralMarketRules.add(current,amount),account);
-	}
-
-	private static String collect(Connection c, Player p) throws SQLException {
-		int account = p.getAccount().getId();
-		long gross = lng(row(c,"SELECT proceeds FROM central_market_wallet WHERE account_id=?",account),"proceeds");
-		if (gross <= 0) throw new IllegalArgumentException("No sale proceeds to collect.");
-		long net = CentralMarketRules.collect(gross,p.getAccount().getMembership() > 0);
-		credit(c,account,net);
-		update(c,"UPDATE central_market_wallet SET proceeds=0 WHERE account_id=?",account);
-		update(c,"INSERT INTO central_market_collections(account_id,gross,net,collected_at) VALUES(?,?,?,?)",account,gross,net,System.currentTimeMillis());
-		return "Collected " + net + " Kinah after market tax.";
 	}
 
 	private static String favorite(Connection c, int account, int item) throws SQLException {
@@ -555,24 +582,48 @@ public final class CentralMarketService {
 	}
 
 	private static void maintain() {
-		if (!ready) return;
-		synchronized (LOCK) {
-			List<Integer> allocated = new ArrayList<>();
-			try (Connection c = DatabaseFactory.getConnection()) {
-				c.setAutoCommit(false);
-				try {
-					long now = System.currentTimeMillis();
-					update(c,"UPDATE central_market_orders SET state='OPEN' WHERE state='QUEUED' AND available_at<=?",now);
-					for (Map<String,Object> r : rows(c,"SELECT DISTINCT variant FROM central_market_orders WHERE state='OPEN'")) match(c,str(r,"variant"),allocated);
-					for (Map<String,Object> r : rows(c,"SELECT c.*,COALESCE(SUM(IF(o.side='B',o.remaining,0)),0) buys,COALESCE(SUM(IF(o.side='S',o.remaining,0)),0) sells FROM central_market_catalog c JOIN central_market_orders o ON o.variant=c.variant AND o.state='OPEN' WHERE c.updated_at<? GROUP BY c.variant",now-8*60*60*1000L)) {
-						long base = lng(r,"base_price"), next = CentralMarketRules.adjust(base,lng(r,"floor_price"),lng(r,"ceiling_price"),lng(r,"buys"),lng(r,"sells"));
-						update(c,"UPDATE central_market_catalog SET previous_price=base_price,base_price=?,updated_at=? WHERE variant=?",next,now,str(r,"variant"));
-					}
-					update(c,"DELETE FROM central_market_requests WHERE created_at<?",now-7*24*60*60*1000L);
-					c.commit();
-				} catch (Exception e) { c.rollback(); for (int id : allocated) IDFactory.getInstance().releaseId(id); throw e; }
-			} catch (Exception e) { log.error("Central Market maintenance failed",e); }
-		}
+		if(!ready || GameServer.isShuttingDownSoon()) return;
+		try(Connection lookup=DatabaseFactory.getConnection()) {
+			long now=System.currentTimeMillis();
+			Set<String> keys=new LinkedHashSet<>();
+			for(var r:rows(lookup,"SELECT DISTINCT variant FROM central_market_orders WHERE account_id>0 AND (state='OPEN' OR (state='QUEUED' AND available_at<=?))",now)) keys.add(str(r,"variant"));
+			if(CentralMarketSimulationConfig.ENABLED && CentralMarketSimulationConfig.POPULATION>0) {
+				for(var r:rows(lookup,"SELECT variant FROM central_market_simulation WHERE next_refresh<=? ORDER BY next_refresh LIMIT 40",now)) keys.add(str(r,"variant"));
+				if(!simulationInitialized) {
+					var fresh=rows(lookup,"SELECT c.variant FROM central_market_catalog c LEFT JOIN central_market_simulation s ON s.variant=c.variant WHERE s.variant IS NULL LIMIT 40");
+					for(var r:fresh) keys.add(str(r,"variant"));
+					simulationInitialized=fresh.isEmpty();
+				}
+			}
+			for(String key:keys) {
+				LOCK.lock();try {
+				List<Integer> allocated=new ArrayList<>();
+				try(Connection c=DatabaseFactory.getConnection()) {
+					c.setAutoCommit(false);
+					try {
+						update(c,"UPDATE central_market_orders SET state='OPEN' WHERE variant=? AND state='QUEUED' AND available_at<=?",key,now);
+						Map<String,Object> entry=row(c,"SELECT * FROM central_market_catalog WHERE variant=?",key);
+						if(entry==null) continue;
+						boolean real=row(c,"SELECT id FROM central_market_orders WHERE variant=? AND account_id>0 AND state='OPEN' LIMIT 1",key)!=null;
+						if(real) match(c,key,allocated);
+						CentralMarketSimulation.refresh(c,entry,now);
+						if(real) match(c,key,allocated);
+						if(lng(entry,"updated_at")<now-8*60*60*1000L) {
+							var demand=row(c,"SELECT COALESCE(SUM(IF(side='B',remaining,0)),0) buys,COALESCE(SUM(IF(side='S',remaining,0)),0) sells FROM central_market_orders WHERE variant=? AND state='OPEN'",key);
+							long next=CentralMarketRules.adjust(lng(entry,"base_price"),lng(entry,"floor_price"),lng(entry,"ceiling_price"),lng(demand,"buys"),lng(demand,"sells"));
+							update(c,"UPDATE central_market_catalog SET previous_price=base_price,base_price=?,updated_at=? WHERE variant=?",next,now,key);
+						}
+						c.commit();
+					} catch(Exception e) { c.rollback();for(int id:allocated) IDFactory.getInstance().releaseId(id);throw e; }
+				}
+				} finally { LOCK.unlock(); }
+			}
+			if(now>=housekeepingAt) {
+				housekeepingAt=now+60_000;
+				update(lookup,"DELETE FROM central_market_requests WHERE created_at<?",now-7*86400000L);
+				update(lookup,"DELETE FROM central_market_orders WHERE account_id=0 AND state='CANCELLED' AND id NOT IN (SELECT buy_order FROM central_market_trades) AND id NOT IN (SELECT sell_order FROM central_market_trades) LIMIT 1000");
+			}
+		} catch(Exception e) { log.error("Central Market maintenance failed",e); }
 	}
 
 	private static long volume(Connection c, int account) throws SQLException {
@@ -584,11 +635,14 @@ public final class CentralMarketService {
 
 	private static List<Item> marketItems(int account) throws SQLException {
 		try(Connection c=DatabaseFactory.getConnection()) {
-			List<Item> items=new ArrayList<>();
-			for(var row:rows(c,"SELECT item_unique_id FROM inventory WHERE item_owner=? AND item_location=?",account,MARKET))
-				items.add(InventoryDAO.loadTransactionItem(c,(int)lng(row,"item_unique_id")));
-			loadStones(c,items);return items;
+			return marketItems(c,account);
 		}
+	}
+	private static List<Item> marketItems(Connection c,int account) throws SQLException {
+		List<Item> items=new ArrayList<>();
+		for(var row:rows(c,"SELECT item_unique_id FROM inventory WHERE item_owner=? AND item_location=?",account,MARKET))
+			items.add(InventoryDAO.loadTransactionItem(c,(int)lng(row,"item_unique_id")));
+		loadStones(c,items);return items;
 	}
 
 	private static void loadStones(Connection c,List<Item> items) throws SQLException {
@@ -613,21 +667,26 @@ public final class CentralMarketService {
 		if (guard == null) throw new IllegalArgumentException("Log in to use Warehouse.");
 		// Browsing has no custody mutations. Do not queue it behind account transfers,
 		// full warehouse snapshots or market matching; actions revalidate prices.
-		if("catalog".equals(args.get("section"))) {
+		if("catalog".equals(args.get("section")) || "detail".equals(args.get("section"))) {
 			int account=p.getAccount().getId();
 			try(Connection c=DatabaseFactory.getConnection()) {
 				Map<String,Object> result=new LinkedHashMap<>();
 				result.put("serverTime",System.currentTimeMillis());
 				List<Integer> favorites=rows(c,"SELECT item_id FROM central_market_favorites WHERE account_id=?",account).stream().map(r->(int)lng(r,"item_id")).toList();
-				catalogView(c,p,args,favorites,result);
+				if("detail".equals(args.get("section"))) result.put("selected",selectedView(c,account,args.getOrDefault("variant",""),null));
+				else catalogView(c,p,args,favorites,result);
 				return result;
 			}
 		}
-		synchronized (guard) { synchronized (LOCK) {
+		synchronized (guard) {
 			int account = p.getAccount().getId();
 			try (Connection c = DatabaseFactory.getConnection()) {
+				// A consistent database snapshot keeps wallets, claims and custody together
+				// without making all other players wait for warehouse item rendering.
+				c.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+				c.setAutoCommit(false);
 				Map<String,Object> result = new LinkedHashMap<>();
-				result.put("player",p.getName()); result.put("serverTime",System.currentTimeMillis());
+				result.put("simulatedTraders",CentralMarketSimulationConfig.ENABLED?CentralMarketSimulationConfig.POPULATION:0); result.put("player",p.getName()); result.put("serverTime",System.currentTimeMillis());
 				if("detail".equals(args.get("section"))) {
 					result.put("selected",selectedView(c,account,args.getOrDefault("variant",""),null));
 					return result;
@@ -643,20 +702,26 @@ public final class CentralMarketService {
 				result.put("favorites",favorites);
 				result.put("savedSearches",rows(c,"SELECT term FROM central_market_searches WHERE account_id=? ORDER BY created_at DESC",account));
 				result.put("notifications",rows(c,"SELECT o.id,o.variant,o.price,o.remaining,o.available_at,c.item_id,c.enchant,c.tempering FROM central_market_orders o JOIN central_market_catalog c ON c.variant=o.variant WHERE o.state='QUEUED' ORDER BY o.available_at LIMIT 100"));
+				@SuppressWarnings("unchecked") List<Map<String,Object>> notifications=(List<Map<String,Object>>)result.get("notifications");
+				notifications.addAll(rows(c,"SELECT t.variant,t.unit_price price,t.quantity remaining,t.traded_at available_at,IF(t.buyer_account=?,'Bought','Sold') direction,IF(t.buyer_account=?,t.buy_order,t.sell_order) order_id,c.item_id,c.enchant,c.tempering FROM central_market_trades t JOIN central_market_catalog c ON c.variant=t.variant WHERE t.buyer_account=? OR t.seller_account=? ORDER BY t.id DESC LIMIT 50",account,account,account,account));
+				List<Item> held=List.of();
+				if(!"activity".equals(args.get("section"))) {
 				List<Map<String,Object>> storages = new ArrayList<>();
 				for (int id : new int[]{0,1,2}) {
 					Storage storage = p.getStorage(id);
 					storages.add(Map.of("id",id,"name",id==0?"Inventory":id==1?"Character Warehouse":"Account Warehouse","limit",storage.getLimit(),"kinah",storage.getKinah(),"items",storage.getItems().stream().filter(i->!i.isEquipped() && visibleInStorage(i.getItemTemplate())).sorted(Comparator.comparingLong(Item::getEquipmentSlot).thenComparingInt(Item::getObjectId)).map(i->itemView(i,id)).toList()));
 				}
 				Map<Integer,Map<String,Object>> custody = rows(c,"SELECT * FROM central_market_stock WHERE account_id=?",account).stream().collect(Collectors.toMap(r->(int)lng(r,"item_unique_id"),r->r));
-				List<Item> held = marketItems(account);
+				held = marketItems(c,account);
 				List<Map<String,Object>> marketView = new ArrayList<>();
 				for (Item i : held) {
 						Map<String,Object> row = custody.get(i.getObjectId()); if (row == null || !visibleInStorage(i.getItemTemplate())) continue;
+						if(row.get("order_id")!=null && row(c,"SELECT id FROM central_market_orders WHERE id=? AND side='B'",row.get("order_id"))!=null) continue;
 					Map<String,Object> view = itemView(i,MARKET); view.put("reserved",row.get("order_id")!=null); view.put("order",row.get("order_id")); marketView.add(view);
 				}
 				storages.add(Map.of("id",MARKET,"name","Market Warehouse","limit",0,"kinah",balance,"items",marketView)); result.put("storages",storages);
 				catalogView(c,p,args,favorites,result);
+				}
 				String of=args.getOrDefault("orderFilter","all"),hf=args.getOrDefault("historyFilter","all");
 				String oc=of.equals("B")?" AND o.side='B'":of.equals("S")?" AND o.side='S'":of.equals("open")?" AND o.state IN ('OPEN','QUEUED')":"";
 				String hc=hf.equals("Bought")?"t.buyer_account=?":hf.equals("Sold")?"t.seller_account=?":"(t.buyer_account=? OR t.seller_account=?)";
@@ -665,7 +730,7 @@ public final class CentralMarketService {
 				int op=page(args,"orderPage",ot),hp=page(args,"historyPage",hf.equals("collections")?ct:ht);
 				result.put("orderTotal",ot); result.put("orderPage",op); result.put("historyTotal",hf.equals("collections")?ct:ht);result.put("historyPage",hp);
 				result.put("activeOrders",lng(row(c,"SELECT COUNT(*) n FROM central_market_orders WHERE account_id=? AND state IN ('OPEN','QUEUED')",account),"n"));
-				result.put("orders",rows(c,"SELECT o.*,c.item_id,c.enchant,c.tempering FROM central_market_orders o JOIN central_market_catalog c ON c.variant=o.variant WHERE account_id=?"+oc+" ORDER BY o.created_at DESC,o.id DESC LIMIT 50 OFFSET "+(op-1)*50,account));
+				result.put("orders",rows(c,"SELECT o.*,c.item_id,c.enchant,c.tempering,COALESCE(z.gross,0) collectGross,IF(o.side='B',GREATEST(0,o.quantity-o.remaining-COALESCE(z.collected_quantity,o.quantity-o.remaining)),0) collectQuantity FROM central_market_orders o JOIN central_market_catalog c ON c.variant=o.variant LEFT JOIN central_market_settlements z ON z.order_id=o.id WHERE o.account_id=?"+oc+" ORDER BY (COALESCE(z.gross,0)>0 OR (o.side='B' AND o.quantity-o.remaining>COALESCE(z.collected_quantity,o.quantity-o.remaining))) DESC,o.created_at DESC,o.id DESC LIMIT 50 OFFSET "+(op-1)*50,account));
 				List<Object> historyArgs=new ArrayList<>();historyArgs.add(account);Collections.addAll(historyArgs,ha);
 				result.put("history",rows(c,"SELECT t.*,c.item_id,c.enchant,c.tempering,IF(buyer_account=?,'Bought','Sold') direction FROM central_market_trades t JOIN central_market_catalog c ON c.variant=t.variant WHERE "+hc+" ORDER BY t.id DESC LIMIT 50 OFFSET "+(hp-1)*50,historyArgs.toArray()));
 				result.put("collections",rows(c,"SELECT gross,net,collected_at FROM central_market_collections WHERE account_id=? ORDER BY id DESC LIMIT 50 OFFSET "+(hp-1)*50,account));
@@ -673,10 +738,10 @@ public final class CentralMarketService {
 					@SuppressWarnings("unchecked") List<Map<String,Object>> records = (List<Map<String,Object>>)result.get(section);
 					for (Map<String,Object> record : records) { ItemTemplate t=DataManager.ITEM_DATA.getItemTemplate((int)lng(record,"item_id")); record.put("name",t.getName()); }
 				}
-				result.put("selected",selectedView(c,account,args.getOrDefault("variant",""),held));
-				return result;
+				if(!"activity".equals(args.get("section"))) result.put("selected",selectedView(c,account,args.getOrDefault("variant",""),held));
+				c.commit();return result;
 			}
-		} }
+		}
 	}
 
 	private static String catalogCategory(ItemTemplate t) {
@@ -739,7 +804,7 @@ public final class CentralMarketService {
 				if(entry.get("attributes_json")!=null) entry.put("attributes",com.alibaba.fastjson2.JSON.parseObject(str(entry,"attributes_json")));
 				entry.remove("attributes_json");
 				entry.put("levels",CentralMarketRules.ladder(lng(entry,"base_price"),lng(entry,"floor_price"),lng(entry,"ceiling_price")));
-				entry.put("book",rows(c,"SELECT side,price,SUM(remaining) quantity FROM central_market_orders WHERE variant=? AND state='OPEN' GROUP BY side,price ORDER BY price DESC",key));
+				entry.put("book",rows(c,"SELECT side,price,SUM(remaining) quantity,SUM(IF(account_id<>?,remaining,0)) available_quantity FROM central_market_orders WHERE variant=? AND state='OPEN' GROUP BY side,price ORDER BY price DESC",account,key));
 				List<Map<String,Object>> variants=rows(c,"SELECT variant,enchant,tempering FROM central_market_catalog WHERE item_id=? ORDER BY enchant,tempering,variant",lng(entry,"item_id"));
 				int currentTemper=(int)lng(entry,"tempering");
 				for(int enchant=0;enchant<=selectedTemplate.getMaxEnchantLevel();enchant++) {
@@ -795,7 +860,7 @@ public final class CentralMarketService {
 		if(i.hasManaStones())attributes.put("Manastones",i.getItemStones().stream().map(s->s.getItemTemplate().getName()).collect(Collectors.joining(", ")));
 		if(i.isSoulBound())attributes.put("Soul Bound","Yes");
 		if(i.isAmplified())attributes.put("Amplified","Yes");
-		if(i.getTuneCount()!=0)attributes.put("Retuning",i.getTuneCount());
+		if((i.getTuneCount()!=0 && i.getTuneCount()!=-1))attributes.put("Retuning",i.getTuneCount());
 		if(i.getBonusStatsId()!=0)attributes.put("Random bonuses",bonusDescription(i.getItemTemplate(),i.getBonusStatsId()));
 		if(!i.getFusionStones().isEmpty())attributes.put("Armsfusion Manastones",i.getFusionStones().stream().map(s->s.getItemTemplate().getName()).collect(Collectors.joining(", ")));
 		if(i.getIdianStone()!=null)attributes.put("Idian",i.getIdianStone().getItemTemplate().getName()+" ("+i.getIdianStone().getPolishCharge()+" charge)");

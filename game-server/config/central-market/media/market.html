@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Central Market</title><link rel="stylesheet" href="/market/media/market.css?v=native-3"></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Central Market</title><link rel="stylesheet" href="/market/media/market.css?v=orders-4"></head>
 <body>
 <header><div class="crest">CM</div><div class="heading"><h1>Central Market</h1><span id="character">Warehouse</span></div><div class="funds"><span>Market Warehouse</span><strong id="balance">—</strong><small id="reserved">Reserved Kinah —</small></div><button id="refresh" class="refresh" title="Refresh warehouse and market">Refresh</button></header>
 <aside id="warehouse">
@@ -11,7 +11,7 @@
   <div id="storage-item" class="storage-item"><span>Select an item to transfer or register a sale.</span></div>
   <div class="volume"><span>Market Warehouse volume</span><strong id="volume">— / 5,000 VT</strong><div class="meter"><i id="volume-fill"></i></div></div>
   <div class="wallet-transfer"><label for="kinah-amount">Kinah transfer</label><small id="source-kinah">Inventory —</small><input id="kinah-amount" type="text" inputmode="numeric" placeholder="Amount" maxlength="15"><button id="deposit-kinah">Deposit</button><button id="withdraw-kinah">Withdraw</button></div>
-  <div class="proceeds"><span>Sale proceeds <small id="return-rate"></small></span><strong id="proceeds">—</strong><button id="collect">Collect</button></div>
+  <div class="proceeds"><span>Sale proceeds <small id="return-rate"></small></span><strong id="proceeds">—</strong><span class="collection-hint">Collect in My Orders</span></div>
 </aside>
 <main>
   <nav class="market-tabs"><button data-view="market" class="active">Market</button><button data-view="orders">My Orders <span id="order-count"></span></button><button data-view="history">Trade History</button><button data-view="notifications">Notifications <span id="notification-count"></span></button></nav>
@@ -21,9 +21,9 @@
   </div>
   <div id="orders-view" class="other-view"><div class="view-toolbar"><h2>My Orders</h2><select id="order-filter"><option value="all">All orders</option><option value="B">Buy orders</option><option value="S">Sale listings</option><option value="open">Active orders</option></select></div><div id="orders-list"></div><div id="order-pagination" class="history-pagination"></div></div>
   <div id="history-view" class="other-view"><div class="view-toolbar"><h2>Trade History</h2><select id="history-filter"><option value="all">All trades</option><option value="Bought">Purchases</option><option value="Sold">Sales</option><option value="collections">Collections</option></select></div><div id="history-list"></div><div id="history-pagination" class="history-pagination"></div></div>
-  <div id="notifications-view" class="other-view"><div class="view-toolbar"><h2>Registration Queue</h2></div><div id="notifications-list"></div></div>
+  <div id="notifications-view" class="other-view"><div class="view-toolbar"><h2>Market Notifications</h2></div><div id="notifications-list"></div></div>
   <section id="detail" class="detail"><div class="empty-detail"><span class="market-emblem">◇</span><h2>Select an item</h2><p>Check prices, buy orders and sale listings.</p></div></section>
 </main>
 <footer><span class="connection-dot" id="connection-dot"></span><span id="status" role="status" aria-live="polite">Loading Warehouse…</span><span class="keyboard-hint">Enter to search · Esc to close item details</span></footer>
 <div id="dialog-shade" class="dialog-shade"><section id="dialog" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><button id="dialog-close" class="dialog-close">×</button><h2 id="dialog-title"></h2><div id="dialog-body"></div><div id="dialog-error" class="dialog-error" role="alert"></div><div class="dialog-actions"><button id="dialog-cancel">Cancel</button><button id="dialog-confirm" class="primary">Confirm</button></div></section></div>
-<script src="/market/media/market.js?v=native-3"></script></body></html>
+<script src="/market/media/market.js?v=orders-4"></script></body></html>

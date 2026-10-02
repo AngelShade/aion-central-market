@@ -16,6 +16,10 @@ if ($manifest.signatureRepair) { $expected = @($expected | Where-Object { $_ -no
 if ($manifest.inventorySlots -in 180,279) { $expected += 'Data/ui/game/game.pak' }
 if ($manifest.inventorySlots -in 180,279 -and $manifest.files.path -contains 'L10N/enu/data/data.pak') { $expected += 'L10N/enu/data/data.pak' }
 if ($manifest.nativeIcons) { $expected += @('bin64/AionIconBridge.dll', 'bin64/AionIconBridge.index') }
+if ($manifest.marketHud) {
+    $expected += @('bin64/AionMarketShortcut.dll','Data/ui/ui.pak','Textures/ui/ui.pak',
+        'L10N/enu/Data/data.pak','Data/ui/game_hud_s1/game_hud_s1.pak','Data/ui/game_hud_s2/game_hud_s2.pak')
+}
 if (-not $manifest.signatureIsolation -and @($manifest.files).Count -eq 5) { $expected = @($expected | Where-Object { $_ -ne 'bin64/game.dll' }) }
 if (@($manifest.files).Count -ne $expected.Count -or (Compare-Object ($manifest.files.path | Sort-Object) ($expected | Sort-Object))) { throw 'Unexpected backup file list.' }
 foreach ($entry in $manifest.files) {

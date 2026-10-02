@@ -22,6 +22,10 @@ if ($manifest.nativeIcons) {
         throw 'Original client icon inputs changed since preparation.'
     }
 }
+if ($manifest.marketHud) {
+    $expected += @('bin64/AionMarketShortcut.dll','Data/ui/ui.pak','Textures/ui/ui.pak',
+        'L10N/enu/Data/data.pak','Data/ui/game_hud_s1/game_hud_s1.pak','Data/ui/game_hud_s2/game_hud_s2.pak')
+}
 if (@($manifest.files).Count -ne $expected.Count -or (Compare-Object ($manifest.files.path | Sort-Object) ($expected | Sort-Object))) {
     throw 'Unexpected replacement file list.'
 }

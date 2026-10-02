@@ -102,6 +102,42 @@ public final class CentralMarketDatabaseCheck {
 		exec(c,"DELETE FROM central_market_catalog WHERE item_id IN (?,?)",id,other);
 	}
 	static int exec(Connection c,String sql,Object... args)throws SQLException {return CentralMarketService.update(c,sql,args);}
+	static void virtualOrders(Connection c) throws Exception {
+		var data=new com.aionemu.gameserver.dataholders.ItemData();
+		var template=new com.aionemu.gameserver.model.templates.item.ItemTemplate();set(template,"itemId",160000001);set(template,"name","Simulation check");set(template,"maxStackCount",100);set(template,"price",100);set(template,"mask",2);
+		set(data,"items",new HashMap<>(Map.of(160000001,template)));
+		var previous=com.aionemu.gameserver.dataholders.DataManager.ITEM_DATA;
+		com.aionemu.gameserver.dataholders.DataManager.ITEM_DATA=data;
+		try {
+			String key="160000001:0:0";catalog(c,key,1000);
+			long sale=order(c,0,key,"S",100,10), demand=order(c,0,key,"B",90,10);
+			long buy=order(c,2,key,"B",100,4);exec(c,"UPDATE central_market_wallet SET kinah=kinah-400 WHERE account_id=2");
+			match(c,key,new ArrayList<>());c.commit();
+			check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",buy)==0,"visible virtual stock fills a funded buy in the matching transaction");
+			check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",sale)==6,"virtual supply is finite and decrements by the exact purchased amount");
+			check(value(c,"SELECT SUM(i.item_count) n FROM central_market_stock s JOIN inventory i USING(item_unique_id) WHERE s.order_id=?",buy)==4,"virtual purchase creates exact item custody for collection");
+			CentralMarketSettlement.collect(c,2,buy,false);c.commit();
+			long wait=order(c,3,key,"B",95,1);match(c,key,new ArrayList<>());c.commit();
+			check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",wait)==1,"waiting demand below an available ask is not sale stock");
+			long playerSale=order(c,1,key,"S",90,3);int held=stock(c,1,key,playerSale,3);match(c,key,new ArrayList<>());c.commit();
+			check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",wait)==0,"sale first fills a higher player preorder");
+			check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",demand)==8,"remaining sale fills simulated demand immediately");
+			check(value(c,"SELECT COUNT(*) n FROM inventory WHERE item_unique_id=?",held)==0,"simulated buyer consumes the sold custody without a bot inventory");
+			check(value(c,"SELECT COUNT(*) n FROM central_market_wallet WHERE account_id=0")==0,"simulation never creates an account zero wallet");
+			check(value(c,"SELECT COUNT(*) n FROM central_market_trades WHERE buyer_account=0 AND seller_account=0")==0,"simulation never trades with itself");
+			// Legacy purchase receipts already in the warehouse must not be claimable twice.
+			String old="legacy-collection";catalog(c,old,1000);long oldBuy=order(c,4,old,"B",100,2),oldSale=order(c,5,old,"S",100,2);
+			exec(c,"UPDATE central_market_orders SET remaining=0,state='FILLED' WHERE id IN (?,?)",oldBuy,oldSale);
+			exec(c,"INSERT INTO central_market_trades(variant,buyer_account,seller_account,quantity,unit_price,buy_order,sell_order,traded_at) VALUES(?,4,5,2,100,?,?,0)",old,oldBuy,oldSale);
+			exec(c,"UPDATE central_market_wallet SET proceeds=75 WHERE account_id=5");c.commit();
+			CentralMarketSettlement.migrate(c);c.commit();CentralMarketSettlement.migrate(c);c.commit();
+			check(value(c,"SELECT collected_quantity n FROM central_market_settlements WHERE order_id=?",oldBuy)==2,"legacy delivered purchases migrate as already collected");
+			check(value(c,"SELECT gross n FROM central_market_settlements WHERE order_id=?",oldSale)==75,"migration assigns only outstanding legacy sale proceeds");
+			check(value(c,"SELECT gross n FROM central_market_settlements WHERE order_id=?",playerSale)==275,"migration leaves current uncollected sale proceeds intact");
+			CentralMarketSettlement.collect(c,5,oldSale,true);c.commit();
+			check(value(c,"SELECT proceeds n FROM central_market_wallet WHERE account_id=5")==0,"legacy remaining proceeds collect once using per-order receipts");
+		} finally { com.aionemu.gameserver.dataholders.DataManager.ITEM_DATA=previous; }
+	}
 	static void catalog(Connection c,String key,long ceiling)throws SQLException {exec(c,"INSERT INTO central_market_catalog(variant,item_id,enchant,tempering,base_price,floor_price,ceiling_price,previous_price) VALUES(?,160000001,0,0,100,1,?,100)",key,ceiling);}
 	static long order(Connection c,int account,String key,String side,long price,long qty)throws SQLException {
 		try(PreparedStatement s=c.prepareStatement("INSERT INTO central_market_orders(account_id,variant,side,price,quantity,remaining,state,created_at,available_at) VALUES(?,?,?,?,?,?,'OPEN',?,0)",Statement.RETURN_GENERATED_KEYS)){
@@ -135,7 +171,7 @@ public final class CentralMarketDatabaseCheck {
 		DatabaseConfig.DATABASE_USER=user;DatabaseConfig.DATABASE_PASSWORD=password;DatabaseConfig.DATABASE_CONNECTIONS_MAX=5;DatabaseConfig.DATABASE_TIMEOUT=5000;DatabaseFactory.init();
 		try(Connection c=DatabaseFactory.getConnection();Statement s=c.createStatement()){
 			for(String sql:Files.readString(Path.of("game-server/config/central-market/schema.sql")).split(";"))if(!sql.isBlank())s.execute(sql);
-			check(value(c,"SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'central_market_%' AND ENGINE='InnoDB'")==9,"all nine market tables use transactional storage");
+			check(value(c,"SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'central_market_%' AND ENGINE='InnoDB'")==11,"all eleven market tables use transactional storage");
 			batchTransfers(c);catalogPage(c);
 			for(int account=1;account<=8;account++)exec(c,"INSERT INTO central_market_wallet VALUES(?,5000,0,0)",account);
 			catalog(c,"partial",1000);long sale=order(c,1,"partial","S",100,15);int original=stock(c,1,"partial",sale,15);
@@ -147,6 +183,18 @@ public final class CentralMarketDatabaseCheck {
 			check(value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=2")==4000,"buyer receives fifty Kinah price improvement");
 			check(value(c,"SELECT proceeds n FROM central_market_wallet WHERE account_id=1")==1000,"seller has gross proceeds to collect");
 			check(value(c,"SELECT COUNT(*) n FROM central_market_orders WHERE id=? AND state='FILLED' AND remaining=0",buy)==1,"filled order state is correct");
+			check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=2 AND order_id=?",buy)==1,"purchased items remain reserved until this buy order is collected");
+			long balance=value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=2");
+			CentralMarketSettlement.collect(c,2,buy,false);c.rollback();
+			check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=2 AND order_id=?",buy)==1,"rolled back collection keeps purchased custody reserved");
+			CentralMarketSettlement.collect(c,2,buy,false);c.commit();
+			check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=2 AND order_id IS NULL")==1,"collect releases bought items to usable warehouse stock");
+			check(value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=2")==balance,"item collection never charges again");
+			boolean duplicate=false;try{CentralMarketSettlement.collect(c,2,buy,false);}catch(IllegalArgumentException e){duplicate=true;}check(duplicate,"repeated item collection cannot duplicate items");
+			boolean foreign=false;try{CentralMarketSettlement.collect(c,3,sale,false);}catch(IllegalArgumentException e){foreign=true;}check(foreign,"other accounts cannot collect sale proceeds");
+			CentralMarketSettlement.collect(c,1,sale,false);c.commit();
+			check(value(c,"SELECT proceeds n FROM central_market_wallet WHERE account_id=1")==0 && value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=1")==5650,"partial sale collection credits exactly its taxed proceeds");
+			duplicate=false;try{CentralMarketSettlement.collect(c,1,sale,false);}catch(IllegalArgumentException e){duplicate=true;}check(duplicate,"repeated sale collection cannot duplicate Kinah");
 			check(value(c,"SELECT COUNT(*) n FROM inventory WHERE item_owner=2 AND enchant=15 AND tempering=5 AND item_color=11259375 AND item_creator='Custody check' AND item_skin=110900001")==1,"split preserves enhancement, tempering, skin, dye and creator");
 			check(value(c,"SELECT COUNT(*) n FROM item_stones s JOIN inventory i USING(item_unique_id) WHERE i.item_owner=2 AND s.item_id=167000001")==1,"split preserves socket records transactionally");
 			CANCEL.invoke(null,c,1,sale);c.commit();check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=1 AND order_id IS NULL")==1,"cancel returns only the unsold remainder");
@@ -154,7 +202,7 @@ public final class CentralMarketDatabaseCheck {
 			boolean rejected=false;try{CANCEL.invoke(null,c,3,unfilled);}catch(InvocationTargetException e){rejected=true;}check(rejected,"second cancellation cannot issue another refund");
 			catalog(c,"priority",1000);long low=order(c,2,"priority","B",100,1),high=order(c,3,"priority","B",110,1);long prioritySale=order(c,1,"priority","S",100,1);stock(c,1,"priority",prioritySale,1);match(c,"priority",new ArrayList<>());c.commit();
 			check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",high)==0&&value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",low)==1,"highest-price preorder fills first");
-			catalog(c,"fifo",1000);long first=order(c,4,"fifo","B",100,1),second=order(c,5,"fifo","B",100,1);long fifoSale=order(c,1,"fifo","S",100,1);stock(c,1,"fifo",fifoSale,1);match(c,"fifo",new ArrayList<>());c.commit();check(value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",first)==0&&value(c,"SELECT remaining n FROM central_market_orders WHERE id=?",second)==1,"equal-price normal orders use FIFO");
+			catalog(c,"fifo",1000);long first=order(c,4,"fifo","B",100,1),second=order(c,5,"fifo","B",100,1);long fifoSale=order(c,1,"fifo","S",100,1);stock(c,1,"fifo",fifoSale,1);match(c,"fifo",new ArrayList<>());c.commit();check(value(c,"SELECT SUM(remaining) n FROM central_market_orders WHERE id IN (?,?)",first,second)==1,"equal highest-price preorders randomly fill exactly one eligible buyer");
 			catalog(c,"self",1000);order(c,1,"self","B",100,1);long selfSale=order(c,1,"self","S",100,1);stock(c,1,"self",selfSale,1);match(c,"self",new ArrayList<>());c.commit();check(value(c,"SELECT COUNT(*) n FROM central_market_trades WHERE variant='self'")==0,"same account cannot trade with itself");
 			catalog(c,"ceiling",100);order(c,6,"ceiling","B",100,1);order(c,7,"ceiling","B",100,1);long ceilingSale=order(c,1,"ceiling","S",100,1);stock(c,1,"ceiling",ceilingSale,1);match(c,"ceiling",new ArrayList<>());c.commit();check(value(c,"SELECT COUNT(*) n FROM central_market_trades WHERE variant='ceiling' AND buyer_account IN (6,7)")==1,"ceiling lottery fills exactly one eligible account");
 			catalog(c,"rollback",1000);long rollbackBuy=order(c,2,"rollback","B",100,1),rollbackSale=order(c,1,"rollback","S",100,2);stock(c,1,"rollback",rollbackSale,2);c.commit();long trades=value(c,"SELECT COUNT(*) n FROM central_market_trades");ids=new ArrayList<>();match(c,"rollback",ids);c.rollback();for(int id:ids)IDFactory.getInstance().releaseId(id);
@@ -166,6 +214,7 @@ public final class CentralMarketDatabaseCheck {
 			check(CentralMarketRules.ladder(1000,1,10000).getFirst()==925&&CentralMarketRules.ladder(1000,1,10000).getLast()==1075,"price band is plus or minus 7.5 percent");
 			check(CentralMarketRules.adjust(1000,500,1005,10,0)==1005,"demand cannot exceed absolute cap");
 			boolean overflow=false;try{CentralMarketRules.total(Long.MAX_VALUE,2);}catch(IllegalArgumentException e){overflow=true;}check(overflow,"overflow is refused");
+			virtualOrders(c);
 			c.commit();
 		}
 		try(Connection c=DatabaseFactory.getConnection()){check(value(c,"SELECT COUNT(*) n FROM central_market_trades")>0,"committed trades survive a new database connection");}

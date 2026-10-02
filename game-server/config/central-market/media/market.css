@@ -177,3 +177,41 @@ footer { position: absolute; bottom: 0; left: 0; right: 0; height: 32px; padding
 @media (min-width: 1600px) { #warehouse { width: 448px; } main { left: 448px; } .slot { width: 49px; height: 49px; } .slot .item-icon { width: 45px; height: 45px; } .detail { height: 320px; } .detail-main { top: 84px; } .book-row { height: 28px; line-height: 23px; } .chart { height: 126px; } .chart canvas { height: 93px; } }
 @media (max-width: 1150px) { #warehouse { width: 316px; } main { left: 316px; } .storage-grid { left: 8px; right: 8px; } .slot { width: 45px; height: 45px; } .slot .item-icon { width: 41px; height: 41px; } .wallet-transfer input { width: 110px; } .wallet-transfer button { padding-left: 6px; padding-right: 6px; } .market-tabs button { padding: 0 14px; font-size: 12px; } .categories { width: 125px; } .catalog { left: 125px; } .product { padding-right: 140px; } .product .stock, .catalog-heading b { right: 128px; } .product .item-name { font-size: 12px; } .buy-controls button { padding: 5px 6px; font-size: 11px; } .catalog-tools #sub { width: 122px; } }
 @media (max-height: 700px) { header { height: 64px; padding-top: 10px; } .funds { top: 5px; } .refresh { top: 16px; } #warehouse, main { top: 64px; } .detail { height: 238px; } .detail-main { top: 70px; bottom: 10px; } .detail-head .item-icon { width: 42px; height: 42px; } .detail-head h2 { font-size: 16px; } .chart { height: 73px; } .chart canvas { height: 46px; } .product { height: 53px; padding-top: 7px; } .product .item-icon { width: 40px; height: 40px; top: 6px; } .product .stock { top: 18px; } .product .price { top: 15px; } }
+
+/* Raised controls and readable order information, including the legacy embedded browser. */
+body { font-size: 15px; }
+button, input, select { font-size: 14px; }
+button { background: -webkit-linear-gradient(top, #405c6d, #223744); background: linear-gradient(to bottom, #405c6d, #223744); border-color: #7994a3 #435e70 #132630; box-shadow: inset 0 1px 0 rgba(223,241,249,.17), 0 2px 3px rgba(0,0,0,.45); text-shadow: 0 1px 1px #0a1720; }
+button:hover { background: -webkit-linear-gradient(top, #557689, #304d60); background: linear-gradient(to bottom, #557689, #304d60); }
+button:active { box-shadow: inset 0 2px 4px #101f29; }
+.primary { background: -webkit-linear-gradient(top, #a58c50, #63502b); background: linear-gradient(to bottom, #a58c50, #63502b); border-color: #dfc68a #ac8d51 #443416; }
+.primary:hover { background: -webkit-linear-gradient(top, #bea363, #806638); background: linear-gradient(to bottom, #bea363, #806638); }
+small, .heading span, .funds small, .panel-title span, .storage-item, .volume, .wallet-transfer label, .wallet-transfer small, .proceeds span, .proceeds small, .product small, .buy-controls .summary, .chart-label, .pagination span, .dialog label, .dialog .cost, .dialog-error { font-size: 13px; }
+.market-tabs button, .product .item-name, .table-row strong, .confirm-item { font-size: 15px; }
+.detail-head h2 { font-size: 21px; }
+.price-book { overflow: hidden; }
+.book-heading { position: absolute; left: 0; right: 0; top: 0; height: 34px; z-index: 2; font-size: 12px; }
+.book-levels { position: absolute; left: 0; right: 0; top: 34px; bottom: 0; overflow: auto; }
+.book-row { height: 32px; line-height: 27px; font-size: 14px; }
+.book-heading span, .book-row .sell-count { color: #a1e1c0; }
+.book-heading b, .book-row .buy-count { color: #b4c7dc; }
+.availability { color: #bce3ce; font-size: 14px; margin: 6px 0 10px; }
+.collection-hint { position: absolute; right: 14px; bottom: 8px; max-width: 48%; text-align: right; font-size: 11px !important; }
+.order-row { min-height: 114px; padding-right: 210px; }
+.order-actions { position: absolute; right: 12px; top: 12px; width: 184px; text-align: right; }
+.order-actions button { position: static; display: block; margin: 0 0 8px auto; max-width: 184px; }
+.order-actions span { display: block; font-size: 13px; color: #aabdc8; margin-bottom: 12px; }
+.claim-info { color: #e4cd93; }
+.chart { height: 75px; }.chart canvas { height: 47px; }
+@media (min-width: 1600px) {
+ body { font-size: 17px; }
+ button, input, select { font-size: 16px; }
+ small, .product small, .buy-controls .summary, .chart-label, .table-row small { font-size: 15px; }
+ .product .item-name, .product .price, .market-tabs button, .table-row strong { font-size: 17px; }
+ .product { height: 70px; }.product .item-icon { top: 12px; }.product .price { top: 20px; }.product .stock { top: 24px; font-size: 16px; }
+ .detail { height: 370px; }.detail-head h2 { font-size: 23px; }.detail-head select { font-size: 14px; }
+ .book-row { height: 35px; line-height: 30px; font-size: 16px; }.book-heading { font-size: 14px; }
+ .buy-controls button, .availability { font-size: 16px; }.chart { height: 112px; }.chart canvas { height: 78px; }
+ .storage-tabs button, .selection-tools button, .storage-item button, .wallet-transfer button { font-size: 13px; }
+}
+@media (max-width: 1150px) { .book-heading { font-size: 11px; padding-left: 5px; padding-right: 5px; }.order-row { padding-right: 168px; }.order-actions { width: 144px; }.order-actions button { font-size: 12px; padding: 7px; }.availability { font-size: 12px; }.buy-controls button { font-size: 12px; }.chart { height: 56px; }.chart canvas { height: 30px; } }

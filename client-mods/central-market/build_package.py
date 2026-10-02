@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--client-path', type=Path, required=True)
     parser.add_argument('--java', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--menu-only', action='store_true', help='Keep the older Additional Functions entry instead of the HUD shortcut')
     args = parser.parse_args()
     from codec import read_pak, encode_pak
 
@@ -54,7 +55,7 @@ def main():
     # JSON-quoted ASCII values are valid Lua string literals for these labels and URL.
     config = 'PRIVATE_SERVER_MENUS = {\n' + ''.join(
         '    {label = ' + json.dumps(e['label']) + ', command = ' + json.dumps(e['command']) + '},\n'
-        for e in settings['serverCommands']) + '};\n'
+        for e in settings['serverCommands'] if args.menu_only or e['command'] != 'warehouse') + '};\n'
     config += 'PRIVATE_CENTRAL_MARKET_URL = ' + json.dumps(settings['centralMarket']['url']) + ';\n'
     content['PrivateMenus.lua'] = (config + (mod_root / 'PrivateMenus.lua').read_text(encoding='utf-8-sig')).replace('\n', '\r\n').encode('utf-8')
     toc = content['RelicCalc.toc'].decode('utf-8').replace('\r', '').splitlines()
@@ -90,6 +91,11 @@ def main():
     from patch_client import patch_dll as patch_icon_bridge_dll
     native_manifest = build_icon_bridge(root, output)
     dll = patch_icon_bridge_dll(dll)
+    hud_manifest = None
+    if not args.menu_only:
+        sys.path.insert(0, str(mod_root.parent / 'market-shortcut'))
+        from prepare import prepare as prepare_hud
+        dll, hud_manifest = prepare_hud(root, output, dll)
     patched_dll.write_bytes(dll)
     replacements = []
     for staged in sorted(output.rglob('*')):
@@ -101,10 +107,11 @@ def main():
               for f in sorted(previous_addon.rglob('*')) if f.is_file()]
     retired = [{'path': 'bin64/game.dll.patched', 'sha256': digest(root / 'bin64/game.dll.patched')}] if (root / 'bin64/game.dll.patched').exists() else []
     manifest = {'clientRoot': str(root), 'files': replacements, 'legacyAddon': legacy, 'retiredFiles': retired,
-                'inventorySlots': 0, 'signatureIsolation': 'archive-v2', 'nativeIcons': native_manifest}
+                'inventorySlots': 0, 'signatureIsolation': 'archive-v2', 'nativeIcons': native_manifest,
+                'marketHud': hud_manifest}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     print(f'Prepared {len(replacements)} replacements in {output}; client untouched.')
-    print('Prepared the Central Market menu and browser window before Relic Appraiser.')
+    print('Prepared Central Market with ' + ('Additional Functions entry.' if args.menu_only else 'HUD icon beside Shop.'))
 
 
 if __name__ == '__main__':
