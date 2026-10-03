@@ -1,4 +1,7 @@
 /* Client artwork is normalized during asset preparation. */
+/* Instant hover/state changes avoid repeated full-surface browser repaints. */
+button, .product, .meter i { -webkit-transition: none !important; transition: none !important; }
+.dialog { -webkit-animation: none !important; animation: none !important; }
 .item-icon { display: block; overflow: hidden; text-decoration: none; }
 .item-icon img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; max-width: none; border: 0; }
 /* Solid surfaces and explicit controls for Aion 4.8's embedded WebKit. */
@@ -215,3 +218,39 @@ small, .heading span, .funds small, .panel-title span, .storage-item, .volume, .
  .storage-tabs button, .selection-tools button, .storage-item button, .wallet-transfer button { font-size: 13px; }
 }
 @media (max-width: 1150px) { .book-heading { font-size: 11px; padding-left: 5px; padding-right: 5px; }.order-row { padding-right: 168px; }.order-actions { width: 144px; }.order-actions button { font-size: 12px; padding: 7px; }.availability { font-size: 12px; }.buy-controls button { font-size: 12px; }.chart { height: 56px; }.chart canvas { height: 30px; } }
+/* Browse controls use solid surfaces; no animated layout or full-window effects. */
+.item-filters { position: absolute; top: 100px; left: 0; right: 0; height: 76px; padding: 6px 14px; background: #172934; border-bottom: 1px solid #405969; }
+.item-filters label { float: left; margin-right: 12px; color: #a9bdc9; font-size: 11px; }
+.item-filters input, .item-filters select { display: inline-block; font-size: 12px; padding: 5px 7px; height: 29px; margin-left: 3px; }
+.item-filters .level-range input { width: 44px; }.item-filters .price-range input { width: 106px; }
+.item-filters label:nth-child(3) { clear: left; margin-top: 4px; }.item-filters label:nth-child(4) { margin-top: 4px; }
+.item-filters select { padding-right: 22px; width: 122px; }
+.item-filters button { margin-top: 4px; padding: 5px 12px; font-size: 12px; height: 29px; }
+.market-body { top: 176px; }
+.categories { width: 190px; }.catalog { left: 190px; }
+.categories button { box-shadow: none; text-shadow: none; position: relative; padding: 9px 10px; white-space: normal; }
+.categories button span { display: block; padding-right: 36px; }
+.categories button small { position: absolute; right: 8px; top: 10px; font-size: 10px; color: #8da8b8; }
+.categories .category-child { padding-left: 22px; font-size: 11px; background: #11222d; }
+.categories .category-child.active { background: #324a52; }
+.catalog-context { height: 32px; padding: 6px 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: #a5bdc9; border-top: 1px solid #304957; }
+.catalog-context strong { color: #ecd29c; }.catalog-list { top: 101px; }
+.product .stock { text-align: right; top: 12px; }.product .stock small { display: block; font-size: 10px; color: #8da8b8; }
+.product .trend { font-size: 10px; }.catalog-tools #sort { width: 152px; }
+.market-search { padding-right: 282px; }.market-search #clear-search { right: 292px; }.market-search #save-search { right: 241px; }.market-search #saved-searches { right: 172px; }.market-search select { width: 151px; }
+.quality-RARE { color: #8bcb6d; }.quality-LEGEND { color: #70a9f2; }.quality-UNIQUE { color: #ecd094; }.quality-EPIC { color: #efad69; }.quality-MYTHIC { color: #d395ee; }
+.quantity-tools { margin-top: 8px; overflow: hidden; }
+.quantity-tools #max-quantity { float: left; margin-right: 12px; height: 37px; }
+.dialog label.always-max-frame { float: left; display: block; position: relative; margin: 0; padding: 8px 13px; border: 1px solid #7693a3; border-radius: 3px; background: #142733; color: #e7d5ae; height: 37px; cursor: pointer; font-size: 13px; line-height: 19px; }
+.dialog .always-max-frame input { position: absolute; left: 13px; top: 8px; width: 19px; height: 19px; margin: 0; opacity: 0; cursor: pointer; }
+.check-mark { display: inline-block; vertical-align: top; width: 19px; height: 19px; margin-right: 9px; border: 1px solid #94abba; background: #0d1d28; text-align: center; color: #f3d990; font: bold 16px/17px Tahoma, sans-serif; }
+.always-max-frame input:checked + .check-mark { border-color: #e2c78c; background: #4c432e; }
+.always-max-frame input:checked + .check-mark:after { content: '\2713'; }
+.always-max-frame input:focus + .check-mark { outline: 1px solid #e2c78c; outline-offset: 2px; }
+.always-max-frame input:disabled + .check-mark { opacity: .5; }
+.storage-item.batch-actions { height: 108px; }.storage-grid.batch-actions { bottom: 274px; }
+.storage-item #transfer-market-selected { display: block; margin-top: 7px; padding: 6px 10px; max-width: 100%; font-size: 13px; }
+.market-selection-hint { display: block; margin-top: 6px; font-size: 11px; line-height: 15px; }
+@media (min-width: 1600px) { .dialog label.always-max-frame, .storage-item #transfer-market-selected { font-size: 15px; } }
+@media (max-width: 1150px) { .categories { width: 154px; }.catalog { left: 154px; }.item-filters label { margin-right: 8px; }.item-filters .price-range input { width: 87px; }.product { padding-right: 169px; }.product .stock, .catalog-heading b { right: 162px; }.product .price { font-size: 12px; }.catalog-context { font-size: 10px; }.product .item-icon { left: 8px; }.product { padding-left: 62px; } }
+@media (min-width: 1600px) { .categories { width: 220px; }.catalog { left: 220px; }.categories button { font-size: 14px; }.categories .category-child { font-size: 13px; }.categories button small { font-size: 12px; }.catalog-context { font-size: 13px; }.product .stock { top: 17px; }.product .stock small, .product .trend { font-size: 12px; }.item-filters label, .item-filters input, .item-filters select, .item-filters button { font-size: 13px; } }

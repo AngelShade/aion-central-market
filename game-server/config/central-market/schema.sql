@@ -1,5 +1,8 @@
 -- Central Market uses the existing inventory row to preserve every Aion item attribute.
 -- Location 125 is account-owned market custody. central_market_stock controls availability.
+CREATE TABLE IF NOT EXISTS central_market_preferences (
+ account_id INT NOT NULL PRIMARY KEY, always_max TINYINT NOT NULL DEFAULT 0
+) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS central_market_wallet (
  account_id INT NOT NULL PRIMARY KEY, kinah BIGINT NOT NULL DEFAULT 0,
  proceeds BIGINT NOT NULL DEFAULT 0, version BIGINT NOT NULL DEFAULT 0

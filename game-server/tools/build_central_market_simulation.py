@@ -18,6 +18,8 @@ RUNTIME_FILES = [
 SOURCES = [
     "configs/main/CentralMarketSimulationConfig.java", "configs/Config.java",
     "dao/InventoryDAO.java", "services/CentralMarketSimulation.java", "services/CentralMarketSettlement.java", "services/CentralMarketService.java",
+    "services/CentralMarketBrowse.java", "services/CentralMarketPreferences.java",
+    "services/player/WebSessionService.java", "network/aion/clientpackets/CM_ENTER_WORLD.java",
 ]
 
 

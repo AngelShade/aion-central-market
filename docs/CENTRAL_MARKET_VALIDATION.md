@@ -1,4 +1,26 @@
-# Central Market validation — 2026-10-02
+# Central Market validation
+
+## 2026-10-03 release
+
+The current server checks use the newly compiled standalone repository. Browser checks load this repository's production market HTML/CSS/JavaScript into the publisher Aion 4.8 NA Awesomium engine with isolated fixture data; they do not call live market actions.
+
+| Check | Result |
+| --- | --- |
+| Commons/GameServer Maven package | Passed with Java 25; focused checks run separately because upstream skips Maven tests |
+| Isolated MySQL integration | 195 checks passed in a new empty schema; structure-only fixture tables, no live player rows copied or changed |
+| Real catalog regression | 46,452 eligible templates; 5,589 special-inventory templates excluded |
+| World-entry web session | 118 synthetic checks passed: fresh restart token, stable repeat entry, concurrent initialization, native NA packet bytes and packet dispatch |
+| Focused server builder | Compiled and staged 13 runtime classes and six manifest files; staging does not deploy or restart the server |
+| Browser regression | Production market files passed category/filter requests, default tabs, escrow visibility, settled-order removal, refresh/actions, native icon/tooltip links, saved Always Max, failed-save recovery and batch eligibility/capacity/transfer at 1024×740 and 1366×740 with 240-stack storage fixtures |
+| Standard browser fixture | The same functional checks passed at 1920×1052 with 24-stack storages in a fresh process |
+
+The added database cases cover combined level/type/grade/price filtering before pagination, global price sorting, the 24-hour movement ranking, malformed ranges, account-isolated preference persistence, transfer preview eligibility, and order visibility before/after collection and cancellation. Existing escrow, matching, custody, simulation and rollback checks remain included.
+
+The stress browser run stalled in native execution at 1920×1052, including a fresh-process retry, before completing the storage-switch checks. The completed smaller-size cases do not establish large-viewport stress acceptance. Browser fixtures exclude the game's GPU upload and drawing, and do not demonstrate that the intermittent embedded webpage flash is fixed. Live reconnect after a GameServer restart and final in-game responsiveness remain recipient-client acceptance checks.
+
+The current update changes server/frontend source only. Client package, signing, HUD and install/restore checks below were performed for the unchanged October 2 client baseline and were not repeated for this release.
+
+## 2026-10-02 client and previous release baseline
 
 This update is built from the shared standalone repository, with its existing remote documentation commits preserved. The server and client checks use the public source; no private marketplace, quest, motion, graphics, or speech systems are required.
 

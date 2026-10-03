@@ -127,6 +127,7 @@ public final class CentralMarketService {
 
 	public static String action(Player p, Map<String,String> a, String requestId) throws Exception {
 		if (!ready) throw new IllegalStateException("Central Market is unavailable.");
+		String preference=CentralMarketPreferences.tryAction(p,a,requestId);if(preference!=null)return preference;
 		Object guard = p.getClientConnection();
 		if (guard == null) throw new IllegalArgumentException("Log in to use Central Market.");
 		synchronized (guard) {
@@ -716,14 +717,17 @@ public final class CentralMarketService {
 				List<Map<String,Object>> marketView = new ArrayList<>();
 				for (Item i : held) {
 						Map<String,Object> row = custody.get(i.getObjectId()); if (row == null || !visibleInStorage(i.getItemTemplate())) continue;
-						if(row.get("order_id")!=null && row(c,"SELECT id FROM central_market_orders WHERE id=? AND side='B'",row.get("order_id"))!=null) continue;
+						// Escrow belongs to My Orders, not transferable warehouse stock.
+						if(row.get("order_id")!=null) continue;
 					Map<String,Object> view = itemView(i,MARKET); view.put("reserved",row.get("order_id")!=null); view.put("order",row.get("order_id")); marketView.add(view);
 				}
 				storages.add(Map.of("id",MARKET,"name","Market Warehouse","limit",0,"kinah",balance,"items",marketView)); result.put("storages",storages);
 				catalogView(c,p,args,favorites,result);
 				}
 				String of=args.getOrDefault("orderFilter","all"),hf=args.getOrDefault("historyFilter","all");
-				String oc=of.equals("B")?" AND o.side='B'":of.equals("S")?" AND o.side='S'":of.equals("open")?" AND o.state IN ('OPEN','QUEUED')":"";
+				// Keep closed orders only while their items or proceeds still need collection.
+				String oc=" AND (o.state IN ('OPEN','QUEUED') OR EXISTS (SELECT 1 FROM central_market_settlements z WHERE z.order_id=o.id AND (z.gross>0 OR (o.side='B' AND o.quantity-o.remaining>z.collected_quantity))))"
+					+(of.equals("B")?" AND o.side='B'":of.equals("S")?" AND o.side='S'":of.equals("open")?" AND o.state IN ('OPEN','QUEUED')":"");
 				String hc=hf.equals("Bought")?"t.buyer_account=?":hf.equals("Sold")?"t.seller_account=?":"(t.buyer_account=? OR t.seller_account=?)";
 				Object[] ha=hf.equals("Bought")||hf.equals("Sold")?new Object[]{account}:new Object[]{account,account};
 				long ot=lng(row(c,"SELECT COUNT(*) n FROM central_market_orders o WHERE account_id=?"+oc,account),"n"),ht=lng(row(c,"SELECT COUNT(*) n FROM central_market_trades t WHERE "+hc,ha),"n"),ct=lng(row(c,"SELECT COUNT(*) n FROM central_market_collections WHERE account_id=?",account),"n");
@@ -739,7 +743,7 @@ public final class CentralMarketService {
 					for (Map<String,Object> record : records) { ItemTemplate t=DataManager.ITEM_DATA.getItemTemplate((int)lng(record,"item_id")); record.put("name",t.getName()); }
 				}
 				if(!"activity".equals(args.get("section"))) result.put("selected",selectedView(c,account,args.getOrDefault("variant",""),held));
-				c.commit();return result;
+				result.put("alwaysMax",CentralMarketPreferences.load(c,account));c.commit();return result;
 			}
 		}
 	}
@@ -750,37 +754,7 @@ public final class CentralMarketService {
 	}
 
 	static void catalogView(Connection c, Player p, Map<String,String> args, List<Integer> favorites, Map<String,Object> result) throws SQLException {
-		String q = args.getOrDefault("q","").trim().toLowerCase(Locale.ROOT), group = args.getOrDefault("category","All Items"), sub = args.getOrDefault("sub","All"), filter = args.getOrDefault("filter","all");
-		Set<Integer> stockIds = !filter.equals("stock") ? Set.of() : rows(c,"SELECT DISTINCT c.item_id FROM central_market_orders o JOIN central_market_catalog c ON c.variant=o.variant WHERE o.side='S' AND o.state='OPEN'").stream().map(r->(int)lng(r,"item_id")).collect(Collectors.toSet());
-		List<ItemTemplate> matches = templates.stream().filter(t -> t.getName().toLowerCase(Locale.ROOT).contains(q))
-			.filter(t -> group.equals("All Items") || catalogCategory(t).equals(group))
-			.filter(t -> sub.equals("All") || t.getItemGroup().name().equals(sub))
-			.filter(t -> !filter.equals("favorites") || favorites.contains(t.getTemplateId()))
-			.filter(t -> !filter.equals("stock") || stockIds.contains(t.getTemplateId()))
-			.filter(t -> !"usable".equals(filter) || t.getRace()==com.aionemu.gameserver.model.Race.PC_ALL || t.getRace()==p.getRace()).toList();
-		int page; try { page=Math.max(1,Integer.parseInt(args.getOrDefault("page","1"))); } catch(Exception e){page=1;}
-		page=Math.min(page,Math.max(1,(matches.size()+23)/24));
-		String sort=args.getOrDefault("sort","name");
-		boolean allPrices=!sort.equals("name") || filter.equals("changed");
-		List<ItemTemplate> priceItems=allPrices?matches:matches.subList((page-1)*24,Math.min(page*24,matches.size()));
-		Map<Integer,Map<String,Object>> prices=catalogPrices(c,priceItems);
-		Comparator<ItemTemplate> compare=switch(sort) {
-			case "price" -> Comparator.comparingLong(t->lng(prices.get(t.getTemplateId()),"base_price"));
-			case "stock" -> Comparator.<ItemTemplate>comparingLong(t->lng(prices.get(t.getTemplateId()),"stock")).reversed();
-			case "traded" -> Comparator.<ItemTemplate>comparingLong(t->lng(prices.get(t.getTemplateId()),"traded")).reversed();
-			default -> Comparator.comparing(ItemTemplate::getName);
-		};
-		if(!sort.equals("name")) matches=matches.stream().sorted(compare.thenComparing(ItemTemplate::getName)).toList();
-		if(filter.equals("changed")) {
-			matches=matches.stream().filter(t->lng(prices.get(t.getTemplateId()),"base_price")!=lng(prices.get(t.getTemplateId()),"previous_price")).toList();
-			page=Math.min(page,Math.max(1,(matches.size()+23)/24));
-		}
-		List<Map<String,Object>> catalog = new ArrayList<>();
-		for(ItemTemplate t : matches.subList((page-1)*24,Math.min(page*24,matches.size()))) {
-			Map<String,Object> view=templateView(t); Map<String,Object> price=prices.get(t.getTemplateId()); if(price!=null)view.putAll(price); catalog.add(view);
-		}
-		result.put("catalog",catalog); result.put("page",page); result.put("total",matches.size());
-		result.put("subcategories",templates.stream().filter(t->catalogCategory(t).equals(group)).map(t->t.getItemGroup().name()).distinct().sorted().toList());
+		CentralMarketBrowse.view(c,p,args,favorites,result,templates);
 	}
 
 	static Map<Integer,Map<String,Object>> catalogPrices(Connection c,List<ItemTemplate> items) throws SQLException {
@@ -834,7 +808,7 @@ public final class CentralMarketService {
 		return null;
 	}
 
-	private static Map<String,Object> templateView(ItemTemplate t) {
+	static Map<String,Object> templateView(ItemTemplate t) {
 		Map<String,Object> v=new LinkedHashMap<>();
 		v.put("item_id",t.getTemplateId()); v.put("name",t.getName()); v.put("category",category(t));
 		v.put("group",t.getItemGroup().name()); v.put("level",t.getLevel()); v.put("race",t.getRace().name());
@@ -865,7 +839,7 @@ public final class CentralMarketService {
 		if(!i.getFusionStones().isEmpty())attributes.put("Armsfusion Manastones",i.getFusionStones().stream().map(s->s.getItemTemplate().getName()).collect(Collectors.joining(", ")));
 		if(i.getIdianStone()!=null)attributes.put("Idian",i.getIdianStone().getItemTemplate().getName()+" ("+i.getIdianStone().getPolishCharge()+" charge)");
 		if(i.getItemColor()!=null)attributes.put("Dye",String.format("#%06X",i.getItemColor()&0xffffff));
-		v.put("attributes",attributes); return v;
+		v.put("attributes",attributes); CentralMarketPreferences.decorateItem(v,i,source);return v;
 	}
 
 	private static String bonusDescription(ItemTemplate template,int bonus) {

@@ -45,7 +45,7 @@ No original client executable, signed client package, extracted icon PNGs, playe
 
 ## Database and server deployment
 
-1. Back up the database and running GameServer. When market activity exists, keep `inventory`, `item_stones`, and all eleven `central_market_*` tables in the same consistent backup.
+1. Back up the database and running GameServer. When market activity exists, keep `inventory`, `item_stones`, and all twelve `central_market_*` tables in the same consistent backup.
 2. Copy `game-server/config/central-market` including the item-ID mapping and browser assets to `config/central-market` under the running GameServer directory, and copy `game-server/config/main/central-market-simulation.properties` to `config/main`. On startup, the server applies `schema.sql` using `CREATE TABLE IF NOT EXISTS` and verifies InnoDB. The optional `game-server/tools/CentralMarketSchemaInstaller.java` can apply and verify it before startup using the deployed database settings.
 3. Set `gameserver.centralmarket.enable = true` in the running server's `config/mygs.properties`. The defaults are bind `127.0.0.1` and port `8091`, matching the client URL.
 4. Stop GameServer normally with no players online, deploy the newly built JAR, and restart. Confirm `Central Market ready` and `Central Market listening` in its log. A direct unauthenticated `/market/state` request returning 403 is expected.
@@ -53,17 +53,19 @@ No original client executable, signed client package, extracted icon PNGs, playe
 
 Market items use account-owned inventory location `125`. Do not roll back to an older JAR after trading without reconciling market custody and escrow. Client restoration only restores client files; it does not undo trades.
 
-## Latest update — 2026-10-02
+## Latest update â€” 2026-10-03
 
-- Solo trading with 3,000 simulated traders; stock matches before virtual quotes rotate.
-- Stock purchases fill immediately; unfilled quantities stay funded as preorders. The order book labels available sale stock and waiting buyers separately.
-- **Collect Items** and **Collect Kinah** beside individual orders, including partial fills and safe legacy migration.
-- Notifications for your recent purchases and sales, linked to My Orders.
-- Fair matching locks, bounded maintenance, quote reuse, lightweight polling, and independent warehouse/catalog reads.
-- Raised buttons, larger text on large viewports, and a standalone HUD icon beside Shop.
+- Expandable categories and item types, combined level/base-price/grade/armor-slot filters, and server-side sorting before pagination.
+- Opening Price Changes view with a documented 24-hour movement ranking, listed/traded quantities and price-change indicators.
+- Saved account-wide **Always Max** for transfer and sale dialogs, plus an eligibility/capacity-aware **Transfer Market Warehouse** batch action.
+- Market opens by default; cached warehouse panes switch immediately and icon loading is deferred in small batches.
+- Listed items leave the warehouse grid; fully settled orders leave My Orders while trades and collections remain in History.
+- Native web-session refresh on world entry for reconnecting after a GameServer restart.
+
+The simulation, per-order collection, native artwork and standalone HUD shortcut remain included. See [the changelog](CHANGELOG.md) for the complete Central Market release history and commit links. Existing deployments must include the updated schema, browser assets and server classes; startup creates the twelfth market table for account preferences. This server/frontend update does not require another client DLL patch if the standalone shortcut and browser are already installed.
 
 ## Validation scope
 
-The updated shared repository passes the full Commons/GameServer Maven package build, **159 isolated database checks**, and the real-template catalog check (**46,452 eligible**, **5,589 special-inventory exclusions**). Browser checks at 1024×768, 1920×1080 and 2560×1440 found no order-list overflow and kept collection controls in bounds. See [the validation record](docs/CENTRAL_MARKET_VALIDATION.md) for client-package checks and the remaining in-game acceptance steps.
+The updated shared repository passes the full Commons/GameServer Maven package build, **195 isolated database checks**, **118 web-session checks**, and the real-template catalog check (**46,452 eligible**, **5,589 special-inventory exclusions**). Current browser regression checks passed at 1024×740 and 1366×740 with 240-stack fixtures and at 1920×1052 with the standard fixture; larger-viewport stress acceptance remains open. See [the validation record](docs/CENTRAL_MARKET_VALIDATION.md) for client-package checks and the remaining in-game acceptance steps.
 
 The original-client icon bridge previously passed real Awesomium coverage for all 3,588 textures and legacy padding exceptions. Item artwork continues to come from the recipient's unchanged Items.pak. Test transfers, immediate fills, collection, notifications and relogin persistence on the recipient's installation after deployment.

@@ -12,6 +12,8 @@ import com.aionemu.gameserver.utils.idfactory.IDFactory;
 public final class CentralMarketDatabaseCheck {
 	private static String schema;
 	private static int assertions;
+	private static String visibility;
+	static boolean shown(Connection c,long id)throws SQLException {return value(c,"SELECT COUNT(*) n FROM central_market_orders o WHERE o.id=?"+visibility,id)>0;}
 	private static final Method MATCH, CANCEL;
 	static {
 		try { MATCH=CentralMarketService.class.getDeclaredMethod("match",Connection.class,String.class,List.class);MATCH.setAccessible(true);
@@ -91,7 +93,7 @@ public final class CentralMarketDatabaseCheck {
 			templates.set(null,List.of(template));
 			Map<String,Object> result=new LinkedHashMap<>();
 			CentralMarketService.catalogView(c,null,Map.of("q","Catalog","category","Other"),List.of(),result);
-			check(result.keySet().equals(Set.of("catalog","page","total","subcategories")),"catalog read contains no warehouse, wallet or history data");
+			check(result.keySet().equals(Set.of("catalog","page","total","subcategories","categoryTree")),"catalog read contains no warehouse, wallet or history data");
 			check(((List<?>)result.get("catalog")).size()==1 && ((Number)result.get("total")).intValue()==1,"catalog search and category retain matching item");
 			result.clear();CentralMarketService.catalogView(c,null,Map.of("filter","favorites"),List.of(),result);
 			check(((List<?>)result.get("catalog")).isEmpty(),"catalog favorites filter excludes unsaved items");
@@ -102,6 +104,50 @@ public final class CentralMarketDatabaseCheck {
 		exec(c,"DELETE FROM central_market_catalog WHERE item_id IN (?,?)",id,other);
 	}
 	static int exec(Connection c,String sql,Object... args)throws SQLException {return CentralMarketService.update(c,sql,args);}
+	static void marketPreferences(Connection c)throws Exception {
+		check(!CentralMarketPreferences.load(c,1111),"Always Max is off for a new account");
+		CentralMarketPreferences.save(c,1111,true);check(CentralMarketPreferences.load(c,1111),"Always Max persists enabled in the database");
+		check(!CentralMarketPreferences.load(c,1112),"Always Max is isolated between accounts");
+		CentralMarketPreferences.save(c,1111,false);check(!CentralMarketPreferences.load(c,1111),"Always Max persists disabled without duplicate rows");
+		check(value(c,"SELECT COUNT(*) n FROM central_market_preferences WHERE account_id=1111")==1,"preference updates keep one row per account");
+		Field ids=CentralMarketHttpService.class.getDeclaredField("CLIENT_ITEMS");ids.setAccessible(true);Set<Integer> nativeIds=(Set<Integer>)ids.get(null);Set<Integer> oldIds=new HashSet<>(nativeIds);
+		try {
+			nativeIds.add(160000001);var t=new com.aionemu.gameserver.model.templates.item.ItemTemplate();set(t,"itemId",160000001);set(t,"name","Permanent market check");set(t,"mask",2);set(t,"price",100);
+			var item=batchItem(10030101,t,81);check(CentralMarketPreferences.marketTransferable(item),"native tradeable permanent stack is eligible for market preview");
+			item.setSoulBound(true);check(!CentralMarketPreferences.marketTransferable(item),"soul-bound selection hides market transfer");item.setSoulBound(false);
+			item.setEquipped(true);check(!CentralMarketPreferences.marketTransferable(item),"equipped selection hides market transfer");item.setEquipped(false);
+			set(item,"expireTime",1);check(!CentralMarketPreferences.marketTransferable(item),"instance expiry hides market transfer even with permanent template");set(item,"expireTime",0);
+			item.setPendingTuneResult(new com.aionemu.gameserver.model.items.PendingTuneResult(0,0,0,true));check(!CentralMarketPreferences.marketTransferable(item),"unaccepted retuning hides market transfer");item.setPendingTuneResult(null);
+			var view=new HashMap<String,Object>();CentralMarketPreferences.decorateItem(view,item,0);check(Boolean.TRUE.equals(view.get("marketTransferable")),"inventory preview carries explicit market eligibility");CentralMarketPreferences.decorateItem(view,item,125);check(Boolean.FALSE.equals(view.get("marketTransferable")),"Market storage cannot transfer to itself");
+		} finally {nativeIds.clear();nativeIds.addAll(oldIds);exec(c,"DELETE FROM central_market_preferences WHERE account_id=1111");}
+	}
+	static void browseFilters(Connection c)throws Exception {
+		var templates=CentralMarketService.class.getDeclaredField("templates");templates.setAccessible(true);Object original=templates.get(null);
+		List<com.aionemu.gameserver.model.templates.item.ItemTemplate> items=new ArrayList<>();long now=System.currentTimeMillis();
+		try {
+			for(int n=0;n<32;n++) {
+				var t=new com.aionemu.gameserver.model.templates.item.ItemTemplate();int id=100010000+n;
+				set(t,"itemId",id);set(t,"name",String.format("Browse %02d",n));set(t,"level",n<25?50:65);set(t,"itemGroup",com.aionemu.gameserver.model.templates.item.enums.ItemGroup.SWORD);set(t,"itemQuality",n<25?com.aionemu.gameserver.model.templates.item.ItemQuality.UNIQUE:com.aionemu.gameserver.model.templates.item.ItemQuality.MYTHIC);items.add(t);
+				exec(c,"INSERT INTO central_market_catalog(variant,item_id,enchant,tempering,base_price,floor_price,ceiling_price,previous_price,traded,updated_at) VALUES(?,?,0,0,?,1,100000,100,?,?)",id+":0:0",id,100+n*10,n, n==31?now-86_400_001:now);
+			}
+			templates.set(null,List.copyOf(items));Map<String,Object> r=new HashMap<>();
+			CentralMarketService.catalogView(c,null,Map.of("minLevel","65","maxLevel","65","minPrice","360","maxPrice","400","quality","MYTHIC","category","Weapons","sub","Swords","page","999"),List.of(),r);
+			check(((Number)r.get("total")).intValue()==5 && ((Number)r.get("page")).intValue()==1,"combined type/grade/level/price filters apply before count and pagination");
+			check(((List<Map<String,Object>>)r.get("catalog")).stream().allMatch(v->CentralMarketService.lng(v,"base_price")>=360&&CentralMarketService.lng(v,"base_price")<=400),"inclusive base price range never leaks out-of-range items");
+			r.clear();CentralMarketService.catalogView(c,null,Map.of("minPrice","100","maxPrice","410","sort","price-high","page","2"),List.of(),r);
+			check(((List<?>)r.get("catalog")).size()==8&&CentralMarketService.lng(((List<Map<String,Object>>)r.get("catalog")).getFirst(),"base_price")==170,"price ordering applies globally before page two");
+			r.clear();CentralMarketService.catalogView(c,null,Map.of("filter","changed","sort","change"),List.of(),r);
+			check(((Number)r.get("total")).intValue()==30,"opening movers exclude unchanged prices and updates older than 24 hours");
+			check(CentralMarketService.lng(((List<Map<String,Object>>)r.get("catalog")).getFirst(),"item_id")==100010030,"opening movers rank by largest percentage change");
+			r.clear();CentralMarketService.catalogView(c,null,Map.of("minLevel","65","maxLevel","65","filter","stock"),List.of(),r);check(((Number)r.get("total")).intValue()==0,"in-stock filter excludes absent open sell quantities");
+			for(var args:List.of(Map.of("minPrice","900","maxPrice","100"),Map.of("minLevel","65","maxLevel","50"),Map.of("minPrice","bad"),Map.of("maxPrice","99999999999999999999999"))) {
+				try {CentralMarketService.catalogView(c,null,args,List.of(),new HashMap<>());throw new AssertionError("Invalid range accepted");}catch(IllegalArgumentException expected){check(true,"invalid filter range or number rejected safely");}
+			}
+			var armor=new com.aionemu.gameserver.model.templates.item.ItemTemplate();set(armor,"itemGroup",com.aionemu.gameserver.model.templates.item.enums.ItemGroup.PL_TORSO);check(CentralMarketBrowse.type(armor).equals("Plate Armor")&&CentralMarketBrowse.slot(armor).equals("Chest"),"armor separates material and slot using native template groups");
+			set(armor,"itemGroup",com.aionemu.gameserver.model.templates.item.enums.ItemGroup.SPECIAL_MANASTONE);check(CentralMarketBrowse.browseCategory(armor,CentralMarketBrowse.type(armor)).equals("Enhancement"),"composite manastones have their own enhancement subtype");
+			check(((List<Map<String,Object>>)r.get("categoryTree")).stream().anyMatch(v->v.get("name").equals("Weapons")),"category tree supplied independently of empty stock result");
+		} finally {templates.set(null,original);exec(c,"DELETE FROM central_market_catalog WHERE item_id BETWEEN 100010000 AND 100010031");}
+	}
 	static void virtualOrders(Connection c) throws Exception {
 		var data=new com.aionemu.gameserver.dataholders.ItemData();
 		var template=new com.aionemu.gameserver.model.templates.item.ItemTemplate();set(template,"itemId",160000001);set(template,"name","Simulation check");set(template,"maxStackCount",100);set(template,"price",100);set(template,"mask",2);
@@ -150,6 +196,14 @@ public final class CentralMarketDatabaseCheck {
 		exec(c,"INSERT INTO central_market_stock VALUES(?,?,?,?)",id,account,key,order);return id;
 	}
 	public static void main(String[] args)throws Exception {
+		try(var in=CentralMarketService.class.getResourceAsStream("CentralMarketService.class")) {
+			for(var entry:java.lang.classfile.ClassFile.of().parse(in.readAllBytes()).constantPool())
+				if(entry instanceof java.lang.classfile.constantpool.Utf8Entry text && text.stringValue().startsWith(" AND (o.state IN ('OPEN','QUEUED') OR EXISTS")) {
+					visibility=text.stringValue().replace("\u0001","");break;
+				}
+		}
+		if(visibility==null)throw new AssertionError("Current-order visibility predicate is missing");
+		check(visibility.startsWith(" AND (o.state IN ('OPEN','QUEUED') OR EXISTS"),"test uses staged production order visibility SQL");
 		Path root=Path.of(args[0]).toAbsolutePath();Properties p=new Properties();
 		try(var in=Files.newInputStream(root.resolve("config/network/database.properties"))){p.load(in);}
 		Path overrides=root.resolve("config/mygs.properties");if(Files.exists(overrides))try(var in=Files.newInputStream(overrides)){p.load(in);}
@@ -171,8 +225,8 @@ public final class CentralMarketDatabaseCheck {
 		DatabaseConfig.DATABASE_USER=user;DatabaseConfig.DATABASE_PASSWORD=password;DatabaseConfig.DATABASE_CONNECTIONS_MAX=5;DatabaseConfig.DATABASE_TIMEOUT=5000;DatabaseFactory.init();
 		try(Connection c=DatabaseFactory.getConnection();Statement s=c.createStatement()){
 			for(String sql:Files.readString(Path.of("game-server/config/central-market/schema.sql")).split(";"))if(!sql.isBlank())s.execute(sql);
-			check(value(c,"SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'central_market_%' AND ENGINE='InnoDB'")==11,"all eleven market tables use transactional storage");
-			batchTransfers(c);catalogPage(c);
+			check(value(c,"SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'central_market_%' AND ENGINE='InnoDB'")==12,"all twelve market tables use transactional storage");
+			batchTransfers(c);catalogPage(c);browseFilters(c);marketPreferences(c);
 			for(int account=1;account<=8;account++)exec(c,"INSERT INTO central_market_wallet VALUES(?,5000,0,0)",account);
 			catalog(c,"partial",1000);long sale=order(c,1,"partial","S",100,15);int original=stock(c,1,"partial",sale,15);
 			exec(c,"INSERT INTO item_stones(item_unique_id,item_id,slot,category,polishNumber,polishCharge,proc_count) VALUES(?,167000001,0,0,0,0,0)",original);
@@ -184,20 +238,24 @@ public final class CentralMarketDatabaseCheck {
 			check(value(c,"SELECT proceeds n FROM central_market_wallet WHERE account_id=1")==1000,"seller has gross proceeds to collect");
 			check(value(c,"SELECT COUNT(*) n FROM central_market_orders WHERE id=? AND state='FILLED' AND remaining=0",buy)==1,"filled order state is correct");
 			check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=2 AND order_id=?",buy)==1,"purchased items remain reserved until this buy order is collected");
+			check(shown(c,buy)&&shown(c,sale),"filled purchases awaiting collection and active partial sales remain in My Orders");
 			long balance=value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=2");
 			CentralMarketSettlement.collect(c,2,buy,false);c.rollback();
 			check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=2 AND order_id=?",buy)==1,"rolled back collection keeps purchased custody reserved");
 			CentralMarketSettlement.collect(c,2,buy,false);c.commit();
 			check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=2 AND order_id IS NULL")==1,"collect releases bought items to usable warehouse stock");
 			check(value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=2")==balance,"item collection never charges again");
+			check(!shown(c,buy)&&value(c,"SELECT COUNT(*) n FROM central_market_trades WHERE buy_order=?",buy)==1,"collected filled order leaves My Orders while trade history remains");
 			boolean duplicate=false;try{CentralMarketSettlement.collect(c,2,buy,false);}catch(IllegalArgumentException e){duplicate=true;}check(duplicate,"repeated item collection cannot duplicate items");
 			boolean foreign=false;try{CentralMarketSettlement.collect(c,3,sale,false);}catch(IllegalArgumentException e){foreign=true;}check(foreign,"other accounts cannot collect sale proceeds");
 			CentralMarketSettlement.collect(c,1,sale,false);c.commit();
 			check(value(c,"SELECT proceeds n FROM central_market_wallet WHERE account_id=1")==0 && value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=1")==5650,"partial sale collection credits exactly its taxed proceeds");
+			check(shown(c,sale),"active unsold remainder stays in My Orders after proceeds collection");
 			duplicate=false;try{CentralMarketSettlement.collect(c,1,sale,false);}catch(IllegalArgumentException e){duplicate=true;}check(duplicate,"repeated sale collection cannot duplicate Kinah");
 			check(value(c,"SELECT COUNT(*) n FROM inventory WHERE item_owner=2 AND enchant=15 AND tempering=5 AND item_color=11259375 AND item_creator='Custody check' AND item_skin=110900001")==1,"split preserves enhancement, tempering, skin, dye and creator");
 			check(value(c,"SELECT COUNT(*) n FROM item_stones s JOIN inventory i USING(item_unique_id) WHERE i.item_owner=2 AND s.item_id=167000001")==1,"split preserves socket records transactionally");
 			CANCEL.invoke(null,c,1,sale);c.commit();check(value(c,"SELECT COUNT(*) n FROM central_market_stock WHERE account_id=1 AND order_id IS NULL")==1,"cancel returns only the unsold remainder");
+			check(!shown(c,sale),"cancelled settled sale leaves My Orders and returns free warehouse stock");
 			catalog(c,"refund",1000);long unfilled=order(c,3,"refund","B",110,4);exec(c,"UPDATE central_market_wallet SET kinah=kinah-440 WHERE account_id=3");CANCEL.invoke(null,c,3,unfilled);c.commit();check(value(c,"SELECT kinah n FROM central_market_wallet WHERE account_id=3")==5000,"cancel refunds reserved Kinah");
 			boolean rejected=false;try{CANCEL.invoke(null,c,3,unfilled);}catch(InvocationTargetException e){rejected=true;}check(rejected,"second cancellation cannot issue another refund");
 			catalog(c,"priority",1000);long low=order(c,2,"priority","B",100,1),high=order(c,3,"priority","B",110,1);long prioritySale=order(c,1,"priority","S",100,1);stock(c,1,"priority",prioritySale,1);match(c,"priority",new ArrayList<>());c.commit();

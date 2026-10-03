@@ -23,7 +23,7 @@ def main():
     paths.update(git('ls-files', '--others', '--exclude-standard').decode().splitlines())
     paths.add('LICENSE')
     paths.discard(HASHES)
-    allowed = {'.gitignore', 'README.md', 'LICENSE'}
+    allowed = {'.gitignore', 'README.md', 'CHANGELOG.md', 'LICENSE'}
     for name in paths:
         path = ROOT / name
         if not path.is_file():
@@ -66,7 +66,7 @@ Client outputs and server update packages must be built locally for your install
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(contents.items()):
-            info = zipfile.ZipInfo(name, (2026, 10, 2, 0, 0, 0))
+            info = zipfile.ZipInfo(name, (2026, 10, 3, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, data)
     with zipfile.ZipFile(output) as archive:

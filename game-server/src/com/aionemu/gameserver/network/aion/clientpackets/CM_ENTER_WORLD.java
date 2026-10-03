@@ -29,6 +29,7 @@ public class CM_ENTER_WORLD extends AionClientPacket {
 
 	@Override
 	protected void runImpl() {
+		com.aionemu.gameserver.services.player.WebSessionService.send(getConnection());
 		PlayerEnterWorldService.enterWorld(getConnection(), objectId);
 	}
 }
