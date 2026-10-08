@@ -16,11 +16,13 @@ if(-not $IntegrationSource){
  foreach($excluded in @($targetPath,$repoPath)){
   if($output -eq $excluded -or $output.StartsWith($excluded+'\',[StringComparison]::OrdinalIgnoreCase) -or ($excluded -eq $targetPath -and $excluded.StartsWith($output+'\',[StringComparison]::OrdinalIgnoreCase))){throw 'Use an external output/recovery folder.'}
  }
- $IntegrationSource=Join-Path $output ('tooling/integration-'+$release.commit)
+ $IntegrationSource=Join-Path $output ('tooling/mods-'+$release.commit.Substring(0,12))
  if(-not (Test-Path -LiteralPath $IntegrationSource)){
   New-Item -ItemType Directory -Force -Path $IntegrationSource | Out-Null
   & git init $IntegrationSource
   if($LASTEXITCODE -ne 0){throw 'Cannot create integration source checkout.'}
+  & git -C $IntegrationSource config core.longpaths true
+  if($LASTEXITCODE -ne 0){throw 'Cannot enable Git long-path handling for the integration cache.'}
   & git -C $IntegrationSource remote add origin $release.url
   if($LASTEXITCODE -ne 0){throw 'Cannot configure integration source.'}
   & git -C $IntegrationSource fetch --depth 1 origin $release.commit
