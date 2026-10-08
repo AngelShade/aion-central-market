@@ -1,5 +1,9 @@
 # Aion 4.8 Server Emulator - Central Market
 
+## Install with the other published Aetherfall mods
+
+This mod is included in the [combined Season Pass release](https://github.com/AngelShade/aion-season-pass). Its [shared installation guide](https://github.com/AngelShade/aion-season-pass/blob/main/docs/SHARED_MODS.md) combines **Season Pass, Central Market, Wardrobe, Skip Poeta/Ishalgen Journey and Inventory/Warehouse Expansion** in one native client package and one server listener. Use that profile when installing these mods together; do not layer the separate standalone installers. Recorded standalone installations can be upgraded using a separate original client copy. Offline integration checks are distinct from actual gameplay acceptance.
+
 ## Based and works on https://github.com/beyond-aion/aion-server
 
 This repository adds an account-wide Central Market and combined Warehouse window to the [Beyond Aion 4.8 server emulator](https://github.com/beyond-aion/aion-server). The branch starts at upstream commit `267ce6033f39e8d297d2ac2657e5a6e930723578`; [the original README](docs/UPSTREAM_README.md) and GPL-3.0 license are retained.
